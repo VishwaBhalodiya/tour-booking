@@ -1,12 +1,985 @@
-﻿import React,{useEffect,useState} from 'react';import{Link,NavLink,Navigate,useLocation}from'react-router-dom';import{Compass,ArrowUpRight,LayoutDashboard,Map,CalendarDays,MapPin,Tags,Plus,Image,Ticket,Settings,Users,Menu,X,Upload,Trash2,Pencil,Check,ArrowLeft}from'lucide-react';import{useApp,Loading}from'./main';import{api,money,date}from'./api';
-const navigation=[['dashboard','Overview',LayoutDashboard],['packages','Packages',Map],['departures','Departures & prices',CalendarDays],['destinations','Destinations',MapPin],['themes','Travel themes',Tags],['addons','Add-ons',Plus],['banners','Home banners',Image],['bookings','Bookings',Ticket],['settings','Settings',Settings]];
-const fields={packages:[['title','Package title','text'],['description','Description','textarea'],['destination','Destination','destinations'],['themes','Travel themes','multithemes'],['duration','Duration (days)','number'],['hotelCategory','Hotel category','text'],['images','Images (one URL per line)','images'],['itinerary','Day-wise itinerary','itinerary'],['inclusions','Inclusions (one per line)','lines'],['exclusions','Exclusions (one per line)','lines'],['featured','Feature on home page','checkbox'],['active','Published','checkbox']],departures:[['package','Package','packages'],['date','Departure date','date'],['totalSeats','Total seats','number'],['adultRate','Adult base rate (₹)','number'],['childRate','Child base rate (₹)','number'],['singleCharge','Single supplement / traveller (₹)','number'],['tripleCharge','Triple adjustment / traveller (₹, negative = discount)','number'],['season','Season','season'],['seasonMultiplier','Season multiplier (e.g. 1.25 = +25%)','decimal'],['closed','Close this departure','checkbox']],destinations:[['name','Destination name','text'],['description','Description','textarea'],['image','Destination image','image'],['active','Active','checkbox']],themes:[['name','Theme name','text'],['active','Active','checkbox']],addons:[['name','Add-on name','text'],['price','Price (₹)','number'],['perPerson','Charge per traveller','checkbox'],['active','Available','checkbox']],banners:[['title','Headline','textarea'],['subtitle','Supporting text','textarea'],['image','Banner image','image'],['buttonText','Button text','text'],['link','Button link (e.g. /packages)','text'],['active','Show on home page','checkbox']],settings:[['businessName','Business name','text'],['email','Contact email','email'],['phone','Contact phone','text'],['gst','GST (%)','decimal'],['childAgeLimit','Child age limit (inclusive)','number'],['cancellationCutoff','Cancellation cut-off (days)','number']]};
-const defaults={packages:{title:'',description:'',destination:'',themes:[],duration:5,hotelCategory:'',images:[],itinerary:[{day:1,title:'',description:''}],inclusions:[],exclusions:[],featured:false,active:true},departures:{package:'',date:'',totalSeats:24,adultRate:0,childRate:0,singleCharge:0,tripleCharge:0,season:'normal',seasonMultiplier:1,closed:false},destinations:{name:'',description:'',image:'',active:true},themes:{name:'',active:true},addons:{name:'',price:0,perPerson:false,active:true},banners:{title:'',subtitle:'',image:'',buttonText:'Explore journeys',link:'/packages',active:true}};
-export default function Admin(){const{user,ready}=useApp(),location=useLocation(),[open,setOpen]=useState(false);const section=location.pathname.split('/')[2]||'dashboard';if(!ready)return <Loading/>;if(!user)return <Navigate to="/login"/>;if(user.role!=='admin')return <div className="empty"><h1>Admin access required.</h1><Link to="/">Return to website</Link></div>;return <div className="admin-layout"><aside className={`admin-sidebar ${open?'visible':''}`}><Link to="/" className="brand"><Compass/>Roam<span>®</span></Link><span className="eyebrow">AGENCY WORKSPACE</span><nav>{navigation.map(([key,label,Icon])=><NavLink onClick={()=>setOpen(false)} key={key} to={`/admin/${key}`} className={section===key?'active':''}><Icon size={18}/>{label}</NavLink>)}</nav><Link className="back-site" to="/">View customer website <ArrowUpRight size={16}/></Link><div className="admin-person"><span className="avatar">{user.name[0]}</span><div><strong>{user.name}</strong><small>Administrator</small></div></div></aside><div className="admin-main"><div className="admin-topbar"><button className="icon mobile-menu" onClick={()=>setOpen(!open)} aria-label="Toggle admin menu"><Menu/></button><span>Your agency, in good hands.</span><Link to="/" target="_blank">View website <ArrowUpRight size={15}/></Link></div><div className="admin-content" key={section}>{section==='dashboard'?<Dashboard/>:section==='bookings'?<Bookings/>:section==='settings'?<Editor type="settings"/>:fields[section]?<Manager type={section}/>:<Navigate to="/admin/dashboard"/>}</div></div></div>}
-function Dashboard(){const[data,setData]=useState(null),[error,setError]=useState('');useEffect(()=>{api('/admin/dashboard').then(setData).catch(e=>setError(e.message))},[]);return <><span className="eyebrow">THE BIG PICTURE</span><h1>Welcome to your workspace.</h1><p className="muted">A little overview of the journeys you make possible.</p>{error&&<p className="error">{error}</p>}<div className="stats-grid">{[[money(data?.revenue),'Confirmed booking value',Ticket],[data?.bookings??'—','Total bookings',CalendarDays],[data?.users??'—','Registered travellers',Users],[data?.seatsLeft??'—','Seats left this month',MapPin]].map(([n,label,Icon])=><div className="stat" key={label}><Icon size={20}/><strong>{n}</strong><span>{label}</span></div>)}</div><div className="admin-box"><div className="section-head"><div><h3>Departing this month</h3><p className="muted">Your upcoming journeys and available seats.</p></div><Link className="text-link" to="/admin/departures">Manage departures <ArrowUpRight size={16}/></Link></div><div className="table-scroll"><table><thead><tr><th>Journey</th><th>Departure</th><th>Season</th><th>Seats left</th><th>Status</th></tr></thead><tbody>{data?.departures.map(d=><tr key={d._id}><td>{d.package?.title}</td><td>{date(d.date)}</td><td>{d.season}</td><td>{d.totalSeats-d.bookedSeats} / {d.totalSeats}</td><td><span className="badge">{d.closed?'Closed':d.totalSeats===d.bookedSeats?'Sold Out':'Open'}</span></td></tr>)}</tbody></table></div>{data&&!data.departures.length&&<p className="empty-inline">No departures this month. Add a new date to get started.</p>}</div><div className="admin-tip"><ShieldIcon/><div><h3>Your changes travel instantly.</h3><p>Customer pages refresh their data automatically. Pricing is always verified on the server when a booking is placed. Revenue above is confirmed booking value, not collected payments.</p></div></div></>}
-function ShieldIcon(){return <Check size={24}/>}
-function Manager({type}){const{notify,refresh}=useApp(),[items,setItems]=useState(null),[editing,setEditing]=useState(undefined),[error,setError]=useState(''),[search,setSearch]=useState('');const load=()=>api(`/admin/${type}`).then(setItems).catch(e=>setError(e.message));useEffect(()=>{load()},[type]);const title=navigation.find(n=>n[0]===type)?.[1];async function remove(item){if(!confirm(`Delete ${item.title||item.name||'this departure'}? This cannot be undone.`))return;try{await api(`/admin/${type}/${item._id}`,{method:'DELETE'});load();refresh();notify('Record deleted')}catch(e){setError(e.message)}}if(editing!==undefined)return <Editor type={type} record={editing} onClose={()=>setEditing(undefined)} onSaved={()=>{setEditing(undefined);load();refresh()}}/>;return <><div className="section-head"><div><span className="eyebrow">YOUR TRAVEL COLLECTION</span><h1>{title}</h1><p className="muted">Every change here connects directly to your customer website.</p></div><button className="button" onClick={()=>setEditing(null)}><Plus size={18}/> Add {type==='departures'?'departure':type==='packages'?'package':type==='destinations'?'destination':type==='themes'?'theme':type==='addons'?'add-on':'banner'}</button></div>{error&&<p className="error" role="alert">{error}</p>}<div className="admin-box"><input className="admin-search" placeholder={`Search ${title.toLowerCase()}…`} value={search} onChange={e=>setSearch(e.target.value)}/><div className="table-scroll"><table><thead><tr><th>{type==='departures'?'Package / departure':'Name'}</th><th>Details</th><th>Status</th><th>Actions</th></tr></thead><tbody>{items?.filter(i=>JSON.stringify(i).toLowerCase().includes(search.toLowerCase())).map(item=><tr key={item._id}><td><div className="table-name">{(item.image||item.images?.[0])&&<img src={item.image||item.images[0]} alt=""/>}<div><strong>{item.title||item.name||item.package?.title||'Departure'}</strong>{type==='departures'&&<small>{date(item.date)}</small>}</div></div></td><td>{type==='departures'?<>{money(item.adultRate*item.seasonMultiplier)} adult · {money(item.childRate*item.seasonMultiplier)} child<small>{item.totalSeats-item.bookedSeats} / {item.totalSeats} seats · {item.season} × {item.seasonMultiplier}</small></>:type==='packages'?<>{item.destination?.name} · {item.duration} days<small>{item.hotelCategory}{item.featured?' · Featured':''}</small></>:type==='addons'?`${money(item.price)} / ${item.perPerson?'traveller':'booking'}`:item.subtitle||item.description||'—'}</td><td><span className={`status ${item.closed||item.active===false?'cancelled':'confirmed'}`}>{type==='departures'?(item.closed?'Closed':item.totalSeats===item.bookedSeats?'Sold Out':'Open'):item.active?'Published':'Hidden'}</span></td><td><div className="row-actions"><button className="icon" title="Edit" onClick={()=>setEditing(item)}><Pencil size={17}/></button><button className="icon danger" title="Delete" onClick={()=>remove(item)}><Trash2 size={17}/></button></div></td></tr>)}</tbody></table></div>{items&&!items.length&&<p className="empty-inline">Nothing here yet. Add your first record above.</p>}</div></>}
-function normalize(type,record){const value=structuredClone(record||defaults[type]||{});for(const key of ['destination','package'])if(value[key]?._id)value[key]=value[key]._id;if(value.themes)value.themes=value.themes.map(t=>t._id||t);if(value.date)value.date=new Date(value.date).toISOString().slice(0,10);return value}
-function Editor({type,record,onClose,onSaved}){const{notify,refresh}=useApp(),[form,setForm]=useState(()=>normalize(type,record)),[options,setOptions]=useState({}),[error,setError]=useState(''),[busy,setBusy]=useState(false),[uploading,setUploading]=useState('');useEffect(()=>{if(type==='settings')api('/admin/settings').then(setForm).catch(e=>setError(e.message));const resources=type==='packages'?['destinations','themes']:type==='departures'?['packages']:[];Promise.all(resources.map(async r=>[r,await api(`/admin/${r}`)])).then(rows=>setOptions(Object.fromEntries(rows))).catch(e=>setError(e.message))},[type]);const set=(key,v)=>setForm(f=>({...f,[key]:v}));async function upload(key,file){if(!file)return;setUploading(key);try{const body=new FormData();body.append('image',file);const result=await api('/admin/upload',{method:'POST',body});set(key,key==='images'?[...(form.images||[]),result.url]:result.url);notify('Image uploaded')}catch(e){setError(e.message)}finally{setUploading('')}}async function save(e){e.preventDefault();setBusy(true);setError('');try{const body={...form};if(type==='departures')body.date=new Date(`${body.date}T10:00:00`).toISOString();await api(`/admin/${type}${record?`/${record._id}`:''}`,{method:type==='settings'||record?'PUT':'POST',body});notify('Saved — your customer website is updated');refresh();onSaved?.()}catch(e){setError(e.message)}finally{setBusy(false)}}return <><button className="text-link" onClick={onClose||(()=>{})}>{onClose&&<ArrowLeft size={16}/>} {onClose?'Back to collection':'AGENCY PREFERENCES'}</button><h1>{type==='settings'?'The details that make it yours.':`${record?'Edit':'New'} ${type==='departures'?'departure & pricing':type.slice(0,-1)}`}</h1><p className="muted">{type==='departures'?'Season-adjusted rate = base rate × multiplier. Room adjustments apply to each traveller.':'Keep your collection up to date. Customers see these details directly.'}</p><form className="editor-form admin-box" onSubmit={save}>{fields[type].map(([key,label,kind])=><div className={`field ${['textarea','images','itinerary','lines'].includes(kind)?'wide':''}`} key={key}>{kind==='checkbox'?<label className="check-label"><input type="checkbox" checked={!!form[key]} onChange={e=>set(key,e.target.checked)}/>{label}</label>:kind==='itinerary'?<><label>{label}</label><div className="itinerary-editor">{form.itinerary?.map((day,i)=><div className="day-editor" key={i}><div><strong>Day {i+1}</strong><button type="button" className="icon danger" aria-label={`Remove day ${i+1}`} onClick={()=>set('itinerary',form.itinerary.filter((_,j)=>j!==i).map((v,j)=>({...v,day:j+1})))}><X size={16}/></button></div><input placeholder="Day title" aria-label={`Day ${i+1} title`} value={day.title} onChange={e=>set('itinerary',form.itinerary.map((d,j)=>j===i?{...d,title:e.target.value}:d))}/><textarea placeholder="What happens today?" aria-label={`Day ${i+1} description`} value={day.description} onChange={e=>set('itinerary',form.itinerary.map((d,j)=>j===i?{...d,description:e.target.value}:d))}/></div>)}<button type="button" className="button outline" onClick={()=>set('itinerary',[...form.itinerary,{day:form.itinerary.length+1,title:'',description:''}])}><Plus size={16}/> Add day</button></div></>:kind==='multithemes'?<fieldset><legend>{label}</legend>{options.themes?.map(t=><label className="check-label" key={t._id}><input type="checkbox" checked={form.themes?.includes(t._id)||false} onChange={e=>set('themes',e.target.checked?[...form.themes,t._id]:form.themes.filter(id=>id!==t._id))}/>{t.name}</label>)}</fieldset>:<label>{label}{['destinations','packages','season'].includes(kind)?<select required value={form[key]||''} onChange={e=>set(key,e.target.value)}><option value="">Select…</option>{kind==='season'?['off-season','normal','peak'].map(s=><option key={s}>{s}</option>):options[kind]?.map(o=><option key={o._id} value={o._id}>{o.name||o.title}</option>)}</select>:['textarea','images','lines'].includes(kind)?<textarea rows={kind==='textarea'?3:4} value={Array.isArray(form[key])?form[key].join('\n'):form[key]||''} onChange={e=>set(key,['images','lines'].includes(kind)?e.target.value.split('\n'):e.target.value)}/>:<input type={['number','decimal'].includes(kind)?'number':kind==='image'?'text':kind} step={kind==='decimal'?'0.01':kind==='number'?'1':undefined} required={!['image','phone'].includes(key)} value={form[key]??''} onChange={e=>set(key,['number','decimal'].includes(kind)?Number(e.target.value):e.target.value)}/>}</label>}{['image','images'].includes(kind)&&<div className="upload-row"><label className="upload-button"><Upload size={16}/>{uploading===key?'Uploading…':'Upload image'}<input hidden type="file" accept="image/jpeg,image/png,image/webp" disabled={!!uploading} onChange={e=>upload(key,e.target.files[0])}/></label>{(key==='images'?form.images:[form.image])?.filter(Boolean).map((url,i)=><img key={i} src={url} alt="Upload preview"/>)}<small>JPG, PNG or WebP · max 5 MB</small></div>}</div>)}{error&&<p className="error wide" role="alert">{error}</p>}<div className="editor-actions wide"><button className="button" disabled={busy||!!uploading}>{busy?'Saving…':'Save changes'}<Check size={17}/></button>{onClose&&<button type="button" className="button outline" onClick={onClose}>Cancel</button>}</div></form></>}
-function Bookings(){const{notify}=useApp(),[items,setItems]=useState(null),[error,setError]=useState(''),[selected,setSelected]=useState(null),[filter,setFilter]=useState('');const load=()=>api('/admin/bookings').then(setItems).catch(e=>setError(e.message));useEffect(()=>{load()},[]);async function status(b,value){try{await api(`/admin/bookings/${b._id}`,{method:'PUT',body:{status:value}});load();notify(value==='Cancelled'?'Booking cancelled; seats returned':'Booking status updated')}catch(e){setError(e.message)}}return <><span className="eyebrow">EVERY JOURNEY STARTS WITH A YES</span><h1>Your bookings.</h1><p className="muted">Manage travellers, review details and keep every departure on track.</p>{error&&<p className="error">{error}</p>}<div className="admin-box"><select value={filter} onChange={e=>setFilter(e.target.value)} aria-label="Filter booking status"><option value="">All statuses</option>{['Pending','Confirmed','Completed','Cancelled'].map(s=><option key={s}>{s}</option>)}</select><div className="table-scroll"><table><thead><tr><th>Traveller</th><th>Journey</th><th>Amount</th><th>Status</th><th>Details</th></tr></thead><tbody>{items?.filter(b=>!filter||b.status===filter).map(b=><tr key={b._id}><td><strong>{b.user?.name}</strong><small>{b.user?.email}</small></td><td>{b.package?.title}<small>{b.departure&&date(b.departure.date)} · {b.adults+b.children} travellers</small></td><td>{money(b.price.total)}<small>Pay Later</small></td><td><select aria-label={`Status for booking ${b._id}`} value={b.status} disabled={['Cancelled','Completed'].includes(b.status)} onChange={e=>{if(e.target.value!=='Cancelled'||confirm('Cancel booking and return seats?'))status(b,e.target.value)}}>{['Pending','Confirmed','Completed','Cancelled'].map(s=><option key={s}>{s}</option>)}</select></td><td><button className="text-link" onClick={()=>setSelected(b)}>View <ArrowUpRight size={15}/></button></td></tr>)}</tbody></table></div>{items&&!items.length&&<p className="empty-inline">Bookings will appear here when customers reserve a journey.</p>}</div>{selected&&<div className="modal-backdrop" onClick={()=>setSelected(null)}><section className="modal" role="dialog" aria-modal="true" aria-label="Booking details" onClick={e=>e.stopPropagation()}><button className="icon modal-close" onClick={()=>setSelected(null)} aria-label="Close"><X/></button><span className="eyebrow">BOOKING {selected._id.slice(-8).toUpperCase()}</span><h2>{selected.package?.title}</h2><p>{selected.departure&&date(selected.departure.date)} · {selected.sharing} sharing · {selected.status}</p><h3>Traveller details</h3>{selected.travellers.map((t,i)=><p key={i}><strong>{t.name}</strong> · Age {t.age}<small>ID: {t.idProof}</small></p>)}<h3>Price at time of booking</h3><div className="price-breakdown">{[['Adults',selected.price.adultTotal],['Children',selected.price.childTotal],['Room sharing',selected.price.roomCharge],...selected.price.extras.map(a=>[a.name,a.amount]),[`GST (${selected.price.gst}%)`,selected.price.tax],['Total',selected.price.total]].map(([label,value])=><div key={label}><span>{label}</span><strong>{money(value)}</strong></div>)}</div><p className="muted small-text">A booking retains its agreed price. New quotes use the latest departure rates.</p></section></div>}</>}
-
+﻿import React, { useEffect, useState } from "react";
+import { Link, NavLink, Navigate, useLocation } from "react-router-dom";
+import {
+  Compass,
+  ArrowUpRight,
+  LayoutDashboard,
+  Map,
+  CalendarDays,
+  MapPin,
+  Tags,
+  Plus,
+  Image,
+  Ticket,
+  Settings,
+  Users,
+  Menu,
+  X,
+  Upload,
+  Trash2,
+  Pencil,
+  Check,
+  ArrowLeft,
+} from "lucide-react";
+import { useApp, Loading } from "./main";
+import { api, money, date } from "./api";
+const navigation = [
+  ["dashboard", "Overview", LayoutDashboard],
+  ["packages", "Packages", Map],
+  ["departures", "Departures & prices", CalendarDays],
+  ["destinations", "Destinations", MapPin],
+  ["themes", "Travel themes", Tags],
+  ["addons", "Add-ons", Plus],
+  ["banners", "Home banners", Image],
+  ["bookings", "Bookings", Ticket],
+  ["settings", "Settings", Settings],
+];
+const fields = {
+  packages: [
+    ["title", "Package title", "text"],
+    ["description", "Description", "textarea"],
+    ["destination", "Destination", "destinations"],
+    ["themes", "Travel themes", "multithemes"],
+    ["duration", "Duration (days)", "number"],
+    ["hotelCategory", "Hotel category", "text"],
+    ["images", "Images (one URL per line)", "images"],
+    ["itinerary", "Day-wise itinerary", "itinerary"],
+    ["inclusions", "Inclusions (one per line)", "lines"],
+    ["exclusions", "Exclusions (one per line)", "lines"],
+    ["featured", "Feature on home page", "checkbox"],
+    ["active", "Published", "checkbox"],
+  ],
+  departures: [
+    ["package", "Package", "packages"],
+    ["date", "Departure date", "date"],
+    ["totalSeats", "Total seats", "number"],
+    ["adultRate", "Adult base rate (₹)", "number"],
+    ["childRate", "Child base rate (₹)", "number"],
+    ["singleCharge", "Single supplement / traveller (₹)", "number"],
+    [
+      "tripleCharge",
+      "Triple adjustment / traveller (₹, negative = discount)",
+      "number",
+    ],
+    ["season", "Season", "season"],
+    ["seasonMultiplier", "Season multiplier (e.g. 1.25 = +25%)", "decimal"],
+    ["closed", "Close this departure", "checkbox"],
+  ],
+  destinations: [
+    ["name", "Destination name", "text"],
+    ["description", "Description", "textarea"],
+    ["image", "Destination image", "image"],
+    ["active", "Active", "checkbox"],
+  ],
+  themes: [
+    ["name", "Theme name", "text"],
+    ["active", "Active", "checkbox"],
+  ],
+  addons: [
+    ["name", "Add-on name", "text"],
+    ["price", "Price (₹)", "number"],
+    ["perPerson", "Charge per traveller", "checkbox"],
+    ["active", "Available", "checkbox"],
+  ],
+  banners: [
+    ["title", "Headline", "textarea"],
+    ["subtitle", "Supporting text", "textarea"],
+    ["image", "Banner image", "image"],
+    ["buttonText", "Button text", "text"],
+    ["link", "Button link (e.g. /packages)", "text"],
+    ["active", "Show on home page", "checkbox"],
+  ],
+  settings: [
+    ["businessName", "Business name", "text"],
+    ["email", "Contact email", "email"],
+    ["phone", "Contact phone", "text"],
+    ["gst", "GST (%)", "decimal"],
+    ["childAgeLimit", "Child age limit (inclusive)", "number"],
+    ["cancellationCutoff", "Cancellation cut-off (days)", "number"],
+  ],
+};
+const defaults = {
+  packages: {
+    title: "",
+    description: "",
+    destination: "",
+    themes: [],
+    duration: 5,
+    hotelCategory: "",
+    images: [],
+    itinerary: [{ day: 1, title: "", description: "" }],
+    inclusions: [],
+    exclusions: [],
+    featured: false,
+    active: true,
+  },
+  departures: {
+    package: "",
+    date: "",
+    totalSeats: 24,
+    adultRate: 0,
+    childRate: 0,
+    singleCharge: 0,
+    tripleCharge: 0,
+    season: "normal",
+    seasonMultiplier: 1,
+    closed: false,
+  },
+  destinations: { name: "", description: "", image: "", active: true },
+  themes: { name: "", active: true },
+  addons: { name: "", price: 0, perPerson: false, active: true },
+  banners: {
+    title: "",
+    subtitle: "",
+    image: "",
+    buttonText: "Explore journeys",
+    link: "/packages",
+    active: true,
+  },
+};
+export default function Admin() {
+  const { user, ready, catalog } = useApp(),
+    location = useLocation(),
+    [open, setOpen] = useState(false);
+  const section = location.pathname.split("/")[2] || "dashboard";
+  if (!ready) return <Loading />;
+  if (!user) return <Navigate to="/login" />;
+  if (user.role !== "admin")
+    return (
+      <div className="empty">
+        <h1>Admin access required.</h1>
+        <Link to="/">Return to website</Link>
+      </div>
+    );
+  return (
+    <div className="admin-layout">
+      <aside className={`admin-sidebar ${open ? "visible" : ""}`}>
+        <Link to="/" className="brand">
+          <Compass />
+          {catalog?.settings?.businessName || "Roam"}
+          <span>®</span>
+        </Link>
+        <span className="eyebrow">AGENCY WORKSPACE</span>
+        <nav>
+          {navigation.map(([key, label, Icon]) => (
+            <NavLink
+              onClick={() => setOpen(false)}
+              key={key}
+              to={`/admin/${key}`}
+              className={section === key ? "active" : ""}
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <Link className="back-site" to="/">
+          View customer website <ArrowUpRight size={16} />
+        </Link>
+        <div className="admin-person">
+          <span className="avatar">{user.name[0]}</span>
+          <div>
+            <strong>{user.name}</strong>
+            <small>Administrator</small>
+          </div>
+        </div>
+      </aside>
+      <div className="admin-main">
+        <div className="admin-topbar">
+          <button
+            className="icon mobile-menu"
+            onClick={() => setOpen(!open)}
+            aria-label="Toggle admin menu"
+          >
+            <Menu />
+          </button>
+          <span>Your agency, in good hands.</span>
+          <Link to="/" target="_blank">
+            View website <ArrowUpRight size={15} />
+          </Link>
+        </div>
+        <div className="admin-content" key={section}>
+          {section === "dashboard" ? (
+            <Dashboard />
+          ) : section === "bookings" ? (
+            <Bookings />
+          ) : section === "settings" ? (
+            <Editor type="settings" />
+          ) : fields[section] ? (
+            <Manager type={section} />
+          ) : (
+            <Navigate to="/admin/dashboard" />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function Dashboard() {
+  const [data, setData] = useState(null),
+    [error, setError] = useState("");
+  useEffect(() => {
+    api("/admin/dashboard")
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, []);
+  return (
+    <>
+      <span className="eyebrow">THE BIG PICTURE</span>
+      <h1>Welcome to your workspace.</h1>
+      <p className="muted">
+        A little overview of the journeys you make possible.
+      </p>
+      {error && <p className="error">{error}</p>}
+      <div className="stats-grid">
+        {[
+          [money(data?.revenue), "Confirmed booking value", Ticket],
+          [data?.bookings ?? "—", "Total bookings", CalendarDays],
+          [data?.users ?? "—", "Registered travellers", Users],
+          [data?.seatsLeft ?? "—", "Seats left this month", MapPin],
+        ].map(([n, label, Icon]) => (
+          <div className="stat" key={label}>
+            <Icon size={20} />
+            <strong>{n}</strong>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="admin-box">
+        <div className="section-head">
+          <div>
+            <h3>Upcoming departures</h3>
+            <p className="muted">Your upcoming journeys and available seats.</p>
+          </div>
+          <Link className="text-link" to="/admin/departures">
+            Manage departures <ArrowUpRight size={16} />
+          </Link>
+        </div>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Journey</th>
+                <th>Departure</th>
+                <th>Season</th>
+                <th>Seats left</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.departures.map((d) => (
+                <tr key={d._id}>
+                  <td>{d.package?.title}</td>
+                  <td>{date(d.date)}</td>
+                  <td>{d.season}</td>
+                  <td>
+                    {d.totalSeats - d.bookedSeats} / {d.totalSeats}
+                  </td>
+                  <td>
+                    <span className="badge">
+                      {d.closed
+                        ? "Closed"
+                        : d.totalSeats === d.bookedSeats
+                          ? "Sold Out"
+                          : "Open"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {data && !data.departures.length && (
+          <p className="empty-inline">
+            No upcoming departures. Add a new date to get started.
+          </p>
+        )}
+      </div>
+      <div className="admin-tip">
+        <ShieldIcon />
+        <div>
+          <h3>Your changes travel instantly.</h3>
+          <p>
+            Customer pages refresh their data automatically. Pricing is always
+            verified on the server when a booking is placed. Revenue above is
+            confirmed booking value, not collected payments.
+          </p>
+        </div>
+      </div>
+    </>
+  );
+}
+function ShieldIcon() {
+  return <Check size={24} />;
+}
+function Manager({ type }) {
+  const { notify, refresh } = useApp(),
+    [items, setItems] = useState(null),
+    [editing, setEditing] = useState(undefined),
+    [error, setError] = useState(""),
+    [search, setSearch] = useState("");
+  const load = () =>
+    api(`/admin/${type}`)
+      .then(setItems)
+      .catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+  }, [type]);
+  const title = navigation.find((n) => n[0] === type)?.[1];
+  async function remove(item) {
+    if (
+      !confirm(
+        `Delete ${item.title || item.name || "this departure"}? This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await api(`/admin/${type}/${item._id}`, { method: "DELETE" });
+      load();
+      refresh();
+      notify("Record deleted");
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  if (editing !== undefined)
+    return (
+      <Editor
+        type={type}
+        record={editing}
+        onClose={() => setEditing(undefined)}
+        onSaved={() => {
+          setEditing(undefined);
+          load();
+          refresh();
+        }}
+      />
+    );
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">YOUR TRAVEL COLLECTION</span>
+          <h1>{title}</h1>
+          <p className="muted">
+            Every change here connects directly to your customer website.
+          </p>
+        </div>
+        <button className="button" onClick={() => setEditing(null)}>
+          <Plus size={18} /> Add{" "}
+          {type === "departures"
+            ? "departure"
+            : type === "packages"
+              ? "package"
+              : type === "destinations"
+                ? "destination"
+                : type === "themes"
+                  ? "theme"
+                  : type === "addons"
+                    ? "add-on"
+                    : "banner"}
+        </button>
+      </div>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="admin-box">
+        <input
+          className="admin-search"
+          placeholder={`Search ${title.toLowerCase()}…`}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>
+                  {type === "departures" ? "Package / departure" : "Name"}
+                </th>
+                <th>Details</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items
+                ?.filter((i) =>
+                  JSON.stringify(i)
+                    .toLowerCase()
+                    .includes(search.toLowerCase()),
+                )
+                .map((item) => (
+                  <tr key={item._id}>
+                    <td>
+                      <div className="table-name">
+                        {(item.image || item.images?.[0]) && (
+                          <img src={item.image || item.images[0]} alt="" />
+                        )}
+                        <div>
+                          <strong>
+                            {item.title ||
+                              item.name ||
+                              item.package?.title ||
+                              "Departure"}
+                          </strong>
+                          {type === "departures" && (
+                            <small>{date(item.date)}</small>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      {type === "departures" ? (
+                        <>
+                          {money(item.adultRate * item.seasonMultiplier)} adult
+                          · {money(item.childRate * item.seasonMultiplier)}{" "}
+                          child
+                          <small>
+                            {item.totalSeats - item.bookedSeats} /{" "}
+                            {item.totalSeats} seats · {item.season} ×{" "}
+                            {item.seasonMultiplier}
+                          </small>
+                        </>
+                      ) : type === "packages" ? (
+                        <>
+                          {item.destination?.name} · {item.duration} days
+                          <small>
+                            {item.hotelCategory}
+                            {item.featured ? " · Featured" : ""}
+                          </small>
+                        </>
+                      ) : type === "addons" ? (
+                        `${money(item.price)} / ${item.perPerson ? "traveller" : "booking"}`
+                      ) : (
+                        item.subtitle || item.description || "—"
+                      )}
+                    </td>
+                    <td>
+                      <span
+                        className={`status ${item.closed || item.active === false ? "cancelled" : "confirmed"}`}
+                      >
+                        {type === "departures"
+                          ? item.closed
+                            ? "Closed"
+                            : item.totalSeats === item.bookedSeats
+                              ? "Sold Out"
+                              : "Open"
+                          : item.active
+                            ? "Published"
+                            : "Hidden"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        <button
+                          className="icon"
+                          title="Edit"
+                          onClick={() => setEditing(item)}
+                        >
+                          <Pencil size={17} />
+                        </button>
+                        <button
+                          className="icon danger"
+                          title="Delete"
+                          onClick={() => remove(item)}
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+        {items && !items.length && (
+          <p className="empty-inline">
+            Nothing here yet. Add your first record above.
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+function normalize(type, record) {
+  const value = structuredClone(record || defaults[type] || {});
+  for (const key of ["destination", "package"])
+    if (value[key]?._id) value[key] = value[key]._id;
+  if (value.themes) value.themes = value.themes.map((t) => t._id || t);
+  if (value.date) value.date = new Date(value.date).toISOString().slice(0, 10);
+  return value;
+}
+function Editor({ type, record, onClose, onSaved }) {
+  const { notify, refresh } = useApp(),
+    [form, setForm] = useState(() => normalize(type, record)),
+    [options, setOptions] = useState({}),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false),
+    [uploading, setUploading] = useState("");
+  useEffect(() => {
+    if (type === "settings")
+      api("/admin/settings")
+        .then(setForm)
+        .catch((e) => setError(e.message));
+    const resources =
+      type === "packages"
+        ? ["destinations", "themes"]
+        : type === "departures"
+          ? ["packages"]
+          : [];
+    Promise.all(resources.map(async (r) => [r, await api(`/admin/${r}`)]))
+      .then((rows) => setOptions(Object.fromEntries(rows)))
+      .catch((e) => setError(e.message));
+  }, [type]);
+  const set = (key, v) => setForm((f) => ({ ...f, [key]: v }));
+  async function upload(key, file) {
+    if (!file) return;
+    setUploading(key);
+    try {
+      const body = new FormData();
+      body.append("image", file);
+      const result = await api("/admin/upload", { method: "POST", body });
+      set(
+        key,
+        key === "images" ? [...(form.images || []), result.url] : result.url,
+      );
+      notify("Image uploaded");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setUploading("");
+    }
+  }
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const body = { ...form };
+      if (type === "departures")
+        body.date = new Date(`${body.date}T10:00:00`).toISOString();
+      await api(`/admin/${type}${record ? `/${record._id}` : ""}`, {
+        method: type === "settings" || record ? "PUT" : "POST",
+        body,
+      });
+      notify("Saved — your customer website is updated");
+      refresh();
+      onSaved?.();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <button className="text-link" onClick={onClose || (() => {})}>
+        {onClose && <ArrowLeft size={16} />}{" "}
+        {onClose ? "Back to collection" : "AGENCY PREFERENCES"}
+      </button>
+      <h1>
+        {type === "settings"
+          ? "The details that make it yours."
+          : `${record ? "Edit" : "New"} ${type === "departures" ? "departure & pricing" : type.slice(0, -1)}`}
+      </h1>
+      <p className="muted">
+        {type === "departures"
+          ? "Season-adjusted rate = base rate × multiplier. Room adjustments apply to each traveller."
+          : "Keep your collection up to date. Customers see these details directly."}
+      </p>
+      <form className="editor-form admin-box" onSubmit={save}>
+        {fields[type].map(([key, label, kind]) => (
+          <div
+            className={`field ${["textarea", "images", "itinerary", "lines"].includes(kind) ? "wide" : ""}`}
+            key={key}
+          >
+            {kind === "checkbox" ? (
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={!!form[key]}
+                  onChange={(e) => set(key, e.target.checked)}
+                />
+                {label}
+              </label>
+            ) : kind === "itinerary" ? (
+              <>
+                <label>{label}</label>
+                <div className="itinerary-editor">
+                  {form.itinerary?.map((day, i) => (
+                    <div className="day-editor" key={i}>
+                      <div>
+                        <strong>Day {i + 1}</strong>
+                        <button
+                          type="button"
+                          className="icon danger"
+                          aria-label={`Remove day ${i + 1}`}
+                          onClick={() =>
+                            set(
+                              "itinerary",
+                              form.itinerary
+                                .filter((_, j) => j !== i)
+                                .map((v, j) => ({ ...v, day: j + 1 })),
+                            )
+                          }
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <input
+                        placeholder="Day title"
+                        aria-label={`Day ${i + 1} title`}
+                        value={day.title}
+                        onChange={(e) =>
+                          set(
+                            "itinerary",
+                            form.itinerary.map((d, j) =>
+                              j === i ? { ...d, title: e.target.value } : d,
+                            ),
+                          )
+                        }
+                      />
+                      <textarea
+                        placeholder="What happens today?"
+                        aria-label={`Day ${i + 1} description`}
+                        value={day.description}
+                        onChange={(e) =>
+                          set(
+                            "itinerary",
+                            form.itinerary.map((d, j) =>
+                              j === i
+                                ? { ...d, description: e.target.value }
+                                : d,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="button outline"
+                    onClick={() =>
+                      set("itinerary", [
+                        ...form.itinerary,
+                        {
+                          day: form.itinerary.length + 1,
+                          title: "",
+                          description: "",
+                        },
+                      ])
+                    }
+                  >
+                    <Plus size={16} /> Add day
+                  </button>
+                </div>
+              </>
+            ) : kind === "multithemes" ? (
+              <fieldset>
+                <legend>{label}</legend>
+                {options.themes?.map((t) => (
+                  <label className="check-label" key={t._id}>
+                    <input
+                      type="checkbox"
+                      checked={form.themes?.includes(t._id) || false}
+                      onChange={(e) =>
+                        set(
+                          "themes",
+                          e.target.checked
+                            ? [...form.themes, t._id]
+                            : form.themes.filter((id) => id !== t._id),
+                        )
+                      }
+                    />
+                    {t.name}
+                  </label>
+                ))}
+              </fieldset>
+            ) : (
+              <label>
+                {label}
+                {["destinations", "packages", "season"].includes(kind) ? (
+                  <select
+                    required
+                    value={form[key] || ""}
+                    onChange={(e) => set(key, e.target.value)}
+                  >
+                    <option value="">Select…</option>
+                    {kind === "season"
+                      ? ["off-season", "normal", "peak"].map((s) => (
+                          <option key={s}>{s}</option>
+                        ))
+                      : options[kind]?.map((o) => (
+                          <option key={o._id} value={o._id}>
+                            {o.name || o.title}
+                          </option>
+                        ))}
+                  </select>
+                ) : ["textarea", "images", "lines"].includes(kind) ? (
+                  <textarea
+                    rows={kind === "textarea" ? 3 : 4}
+                    value={
+                      Array.isArray(form[key])
+                        ? form[key].join("\n")
+                        : form[key] || ""
+                    }
+                    onChange={(e) =>
+                      set(
+                        key,
+                        ["images", "lines"].includes(kind)
+                          ? e.target.value.split("\n")
+                          : e.target.value,
+                      )
+                    }
+                  />
+                ) : (
+                  <input
+                    type={
+                      ["number", "decimal"].includes(kind)
+                        ? "number"
+                        : kind === "image"
+                          ? "text"
+                          : kind
+                    }
+                    step={
+                      kind === "decimal"
+                        ? "0.01"
+                        : kind === "number"
+                          ? "1"
+                          : undefined
+                    }
+                    required={!["image", "phone"].includes(key)}
+                    value={form[key] ?? ""}
+                    onChange={(e) =>
+                      set(
+                        key,
+                        ["number", "decimal"].includes(kind)
+                          ? Number(e.target.value)
+                          : e.target.value,
+                      )
+                    }
+                  />
+                )}
+              </label>
+            )}
+            {["image", "images"].includes(kind) && (
+              <div className="upload-row">
+                <label className="upload-button">
+                  <Upload size={16} />
+                  {uploading === key ? "Uploading…" : "Upload image"}
+                  <input
+                    hidden
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={!!uploading}
+                    onChange={(e) => upload(key, e.target.files[0])}
+                  />
+                </label>
+                {(key === "images" ? form.images : [form.image])
+                  ?.filter(Boolean)
+                  .map((url, i) => (
+                    <img key={i} src={url} alt="Upload preview" />
+                  ))}
+                <small>JPG, PNG or WebP · max 5 MB</small>
+              </div>
+            )}
+          </div>
+        ))}
+        {error && (
+          <p className="error wide" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="editor-actions wide">
+          <button className="button" disabled={busy || !!uploading}>
+            {busy ? "Saving…" : "Save changes"}
+            <Check size={17} />
+          </button>
+          {onClose && (
+            <button type="button" className="button outline" onClick={onClose}>
+              Cancel
+            </button>
+          )}
+        </div>
+      </form>
+    </>
+  );
+}
+function Bookings() {
+  const { notify } = useApp(),
+    [items, setItems] = useState(null),
+    [error, setError] = useState(""),
+    [selected, setSelected] = useState(null),
+    [filter, setFilter] = useState("");
+  const load = () =>
+    api("/admin/bookings")
+      .then(setItems)
+      .catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+  async function status(b, value) {
+    try {
+      await api(`/admin/bookings/${b._id}`, {
+        method: "PUT",
+        body: { status: value },
+      });
+      load();
+      notify(
+        value === "Cancelled"
+          ? "Booking cancelled; seats returned"
+          : "Booking status updated",
+      );
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  return (
+    <>
+      <span className="eyebrow">EVERY JOURNEY STARTS WITH A YES</span>
+      <h1>Your bookings.</h1>
+      <p className="muted">
+        Manage travellers, review details and keep every departure on track.
+      </p>
+      {error && <p className="error">{error}</p>}
+      <div className="admin-box">
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          aria-label="Filter booking status"
+        >
+          <option value="">All statuses</option>
+          {["Pending", "Confirmed", "Completed", "Cancelled"].map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Traveller</th>
+                <th>Journey</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items
+                ?.filter((b) => !filter || b.status === filter)
+                .map((b) => (
+                  <tr key={b._id}>
+                    <td>
+                      <strong>{b.user?.name}</strong>
+                      <small>{b.user?.email}</small>
+                    </td>
+                    <td>
+                      {b.package?.title}
+                      <small>
+                        {b.departure && date(b.departure.date)} ·{" "}
+                        {b.adults + b.children} travellers
+                      </small>
+                    </td>
+                    <td>
+                      {money(b.price.total)}
+                      <small>Pay Later</small>
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`Status for booking ${b._id}`}
+                        value={b.status}
+                        disabled={["Cancelled", "Completed"].includes(b.status)}
+                        onChange={(e) => {
+                          if (
+                            e.target.value !== "Cancelled" ||
+                            confirm("Cancel booking and return seats?")
+                          )
+                            status(b, e.target.value);
+                        }}
+                      >
+                        {["Pending", "Confirmed", "Completed", "Cancelled"].map(
+                          (s) => (
+                            <option key={s}>{s}</option>
+                          ),
+                        )}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        className="text-link"
+                        onClick={() => setSelected(b)}
+                      >
+                        View <ArrowUpRight size={15} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+        {items && !items.length && (
+          <p className="empty-inline">
+            Bookings will appear here when customers reserve a journey.
+          </p>
+        )}
+      </div>
+      {selected && (
+        <div className="modal-backdrop" onClick={() => setSelected(null)}>
+          <section
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Booking details"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="icon modal-close"
+              onClick={() => setSelected(null)}
+              aria-label="Close"
+            >
+              <X />
+            </button>
+            <span className="eyebrow">
+              BOOKING {selected._id.slice(-8).toUpperCase()}
+            </span>
+            <h2>{selected.package?.title}</h2>
+            <p>
+              {selected.departure && date(selected.departure.date)} ·{" "}
+              {selected.sharing} sharing · {selected.status}
+            </p>
+            <h3>Traveller details</h3>
+            {selected.travellers.map((t, i) => (
+              <p key={i}>
+                <strong>{t.name}</strong> · Age {t.age}
+                <small>ID: {t.idProof}</small>
+              </p>
+            ))}
+            <h3>Price at time of booking</h3>
+            <div className="price-breakdown">
+              {[
+                ["Adults", selected.price.adultTotal],
+                ["Children", selected.price.childTotal],
+                ["Room sharing", selected.price.roomCharge],
+                ...selected.price.extras.map((a) => [a.name, a.amount]),
+                [`GST (${selected.price.gst}%)`, selected.price.tax],
+                ["Total", selected.price.total],
+              ].map(([label, value]) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong>{money(value)}</strong>
+                </div>
+              ))}
+            </div>
+            <p className="muted small-text">
+              A booking retains its agreed price. New quotes use the latest
+              departure rates.
+            </p>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}

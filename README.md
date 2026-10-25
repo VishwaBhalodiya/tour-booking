@@ -1,4 +1,4 @@
-# Roam — Tour Package Booking
+﻿# Roam — Tour Package Booking
 
 A MERN travel booking application with an admin-controlled catalogue, MongoDB Atlas, Express, React and Node.js. The project lives directly at `C:\tour-booking`.
 
@@ -41,9 +41,9 @@ A MERN travel booking application with an admin-controlled catalogue, MongoDB At
 
 These are seeded from `server/.env`; customize the variables before seeding if desired.
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | admin@roam.test | ChangeMe!Admin2026 |
+| Role     | Email              | Password              |
+| -------- | ------------------ | --------------------- |
+| Admin    | admin@roam.test    | ChangeMe!Admin2026    |
 | Customer | customer@roam.test | ChangeMe!Customer2026 |
 
 Use these only for local evaluation. Public deployment should use new credentials. Registration always creates a customer; roles are never accepted from registration input.
@@ -76,7 +76,7 @@ Quotes and bookings are calculated on the server. Booking rejects a stale total 
 
 MongoDB transactions reserve seats and create a booking together. Concurrent reservations cannot exceed capacity. Pending, Confirmed and Completed bookings retain seats. Cancelling returns seats once; cancelled bookings cannot be reopened. Customers can cancel only before the configured cut-off. Admins may cancel regardless of cut-off. Completed bookings cannot be changed. Capacity cannot be reduced below already reserved seats. Referenced packages/departures cannot be deleted; hide or close them instead to preserve history.
 
-Revenue on the dashboard means the value of Confirmed and Completed bookings; payments are Pay Later, so it is not cash collected. Upcoming departures and remaining seats are calculated for the current server calendar month.
+Revenue on the dashboard means the value of Confirmed and Completed bookings; payments are Pay Later, so it is not cash collected. The dashboard lists the next twelve departures; available seats include open departures in the current server calendar month.
 
 ## Verification
 
@@ -102,7 +102,31 @@ Tests cover seasonal adult/child prices, sharing discounts, add-ons, GST, invali
 
 ## Screenshots
 
-Screenshots captured during verification will be placed in `docs/screenshots/` and linked here. Capture the database-backed home page, package price breakup and admin dashboard after the seed runs if screenshots are not yet present.
+Captured from the database-backed application during isolated browser QA:
+
+| Customer home                                       | Admin dashboard                                          |
+| --------------------------------------------------- | -------------------------------------------------------- |
+| ![Customer home](docs/screenshots/home-desktop.png) | ![Admin dashboard](docs/screenshots/admin-dashboard.png) |
+
+- [Package page and live price breakup](docs/screenshots/package-pricing.png)
+- [Admin package management](docs/screenshots/admin-packages.png)
+- [Mobile home page](docs/screenshots/home-mobile.png)
+
+Browser verification covers live admin edits, full traveller checkout, seat reservation and cancellation, customer admin-access restrictions, and mobile overflow. It uses an isolated temporary MongoDB replica set. Reproduce with Microsoft Edge installed:
+
+```powershell
+# Terminal 1: isolated QA API
+cd C:\tour-booking\server
+node src/preview.js
+# Terminal 2: frontend
+cd C:\tour-booking
+npm.cmd run dev -w client
+# Terminal 3: browser checks
+cd C:\tour-booking
+node scripts/browser-qa.mjs
+```
+
+Stop the temporary preview API before starting the normal Atlas-backed app.
 
 ## GitHub — public repository
 
