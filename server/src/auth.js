@@ -5,6 +5,7 @@ import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { User } from "./models.js";
+import { frontendOrigin } from "./origins.js";
 
 const wrap = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const fail = (message, status = 400, code) => { throw Object.assign(new Error(message), { status, code }); };
@@ -153,7 +154,7 @@ export function registerAuthRoutes(app) {
   const limit = rateLimit({ windowMs: 15 * 60000, limit: 30 });
   app.use("/api/auth", (req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
   const redirect = (req, route) => {
-    const configured = process.env.CLIENT_URL || "http://localhost:5173";
+    const configured = frontendOrigin();
     const origin = process.env.NODE_ENV !== "production" && ["http://localhost:5173", "http://127.0.0.1:5173"].includes(req.get("origin")) ? req.get("origin") : configured;
     return encodeURIComponent(`${origin.replace(/\/$/, "")}${route}`);
   };

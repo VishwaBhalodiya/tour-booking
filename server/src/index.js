@@ -25,13 +25,14 @@ import {
 import { calculatePrice } from "./pricing.js";
 import { registerMediaRoutes, normalizeImageReferences } from "./media.js";
 import { auth, admin, registerAuthRoutes } from "./auth.js";
+import { frontendOrigin } from "./origins.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = express();
 // Render terminates HTTPS in front of Node. Trust only the immediate hop;
 // trusting two hops would also trust caller-supplied headers on direct API calls.
 // Local development and tests retain Express's default (no proxy trust).
 if (process.env.RENDER === "true") app.set("trust proxy", 1);
-const allowedOrigins = [process.env.CLIENT_URL || "http://localhost:5173"];
+const allowedOrigins = [frontendOrigin()];
 if (process.env.NODE_ENV !== "production")
   allowedOrigins.push("http://127.0.0.1:5173", "http://localhost:5173");
 app.disable("x-powered-by");
@@ -51,8 +52,10 @@ app.use("/api", (req, res, next) => {
     !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
     req.get("origin") &&
     !allowedOrigins.includes(req.get("origin"))
-  )
+  ) {
+    console.warn("Rejected request origin:", req.get("origin"), "Expected frontend:", allowedOrigins[0]);
     return res.status(403).json({ message: "Untrusted request origin." });
+  }
   next();
 });
 const asyncRoute = (fn) => (req, res, next) =>
