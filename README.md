@@ -149,6 +149,8 @@ The intended split deployment is Vercel for the React frontend and Render for th
 
 Production requires HTTPS, `NODE_ENV=production`, an exact frontend `CLIENT_URL`, backend secrets configured on Render, Atlas network access and matching Supabase redirect URLs. The frontend must forward `/api` requests to Render through Vercel rewrites, with an SPA fallback for page refreshes.
 
-Deployment preparation is not complete: Vercel rewrite configuration and backend proxy-trust configuration still need to be added. A production build and manual authentication, booking and image checks remain necessary.
+Vercel rewrites in `client/vercel.json` forward `/api` to `https://roam-tour-api.onrender.com` and provide the SPA fallback. Select `client` as the Vercel root directory. Render automatically sets `RENDER=true`; the API then trusts only its immediate proxy hop. Local development keeps proxy trust disabled. Additional upstream proxies, including Vercel, are not implicitly trusted for client IPs, so requests may share a rate-limit bucket at that upstream proxy. Do not increase the hop count while the Render API remains directly reachable without first securing and validating the forwarding chain.
+
+Set Render's `CLIENT_URL` to the actual Vercel production origin, without a trailing slash, and add that frontend's confirmation/reset URLs in Supabase. Keep the existing secure, HttpOnly cookies and access the API through the Vercel `/api` path. A production build and manual authentication, booking, image and live-update checks remain necessary; these deployment changes have not been runtime-tested.
 
 Payments currently use Pay Later. Online payment processing, coupons and PDF vouchers are not included.

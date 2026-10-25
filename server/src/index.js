@@ -27,6 +27,10 @@ import { registerMediaRoutes, normalizeImageReferences } from "./media.js";
 import { auth, admin, registerAuthRoutes } from "./auth.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = express();
+// Render terminates HTTPS in front of Node. Trust only the immediate hop;
+// trusting two hops would also trust caller-supplied headers on direct API calls.
+// Local development and tests retain Express's default (no proxy trust).
+if (process.env.RENDER === "true") app.set("trust proxy", 1);
 const allowedOrigins = [process.env.CLIENT_URL || "http://localhost:5173"];
 if (process.env.NODE_ENV !== "production")
   allowedOrigins.push("http://127.0.0.1:5173", "http://localhost:5173");
