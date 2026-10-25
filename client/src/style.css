@@ -965,15 +965,53 @@ legend {
   min-height: 680px;
 }
 .auth-art {
-  background:
-    linear-gradient(#173e3266, #173e3288),
-    url("https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=1200&q=85")
-      center/cover;
+  background-color: #173e32;
+  background-size: cover;
+  background-position: center;
   color: #fff;
   padding: 90px 15%;
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+.image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  background: #e7ebdf;
+  color: #76836c;
+  font-size: 11px;
+  text-align: center;
+}
+.card-image .image-placeholder, .destination > .image-placeholder { width: 100%; height: 100%; }
+.gallery > .image-placeholder { min-width: 70%; min-height: 300px; flex: 1; }
+.booking-card > .image-placeholder { width: 160px; height: 140px; }
+.table-name > .image-placeholder { width: 49px; height: 45px; min-height: 45px; font-size: 8px; }
+.media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.media-grid > article { margin-top: 18px; min-width: 0; }
+.media-grid img, .media-grid .image-placeholder { width: 100%; height: 170px; border-radius: 5px; }
+.media-grid p { font-size: 12px; overflow-wrap: anywhere; }
+.media-grid .text-link { display: block; margin-top: 12px; }
+.media-toolbar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.media-toolbar .upload-button { margin: 0; }
+.media-field { margin-top: 0; }
+.media-field > small { display: block; color: #85917c; font-size: 10px; margin-top: 12px; }
+.media-previews { display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 15px; }
+.media-previews > div { width: 145px; }
+.media-previews img, .media-previews .image-placeholder { width: 145px; height: 105px; border-radius: 4px; }
+.media-previews .text-link { font-size: 10px; margin-right: 9px; }
+.media-previews .upload-button { margin: 8px 0; font-size: 10px; padding: 8px; }
+.managed-section { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+.managed-section > img { width: 100%; height: 330px; border-radius: 7px; }
+.values-image { width: 100%; max-height: 260px; border-radius: 7px; margin-bottom: 24px; }
+.admin-sidebar nav { overflow-y: auto; min-height: 0; flex: 1; }
+.admin-sidebar nav a, .back-site, .admin-person { flex-shrink: 0; }
+@media (max-width: 1000px) { .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .media-grid, .managed-section { grid-template-columns: 1fr; }
+  .booking-card > .image-placeholder { width: 85px; height: 110px; }
+  .managed-section > img { height: 250px; }
 }
 .auth-art h1 {
   font-size: 57px;

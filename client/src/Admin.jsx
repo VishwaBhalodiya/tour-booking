@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { useApp, Loading } from "./main";
 import { api, money, date } from "./api";
+import MediaLibrary, { ImageField } from "./MediaLibrary";
+import SiteImage from "./SiteImage";
 const navigation = [
   ["dashboard", "Overview", LayoutDashboard],
   ["packages", "Packages", Map],
@@ -31,10 +33,18 @@ const navigation = [
   ["themes", "Travel themes", Tags],
   ["addons", "Add-ons", Plus],
   ["banners", "Home banners", Image],
+  ["sections", "Website sections", Image],
+  ["media", "Media Library", Image],
   ["bookings", "Bookings", Ticket],
   ["settings", "Settings", Settings],
 ];
 const fields = {
+  sections: [
+    ["title", "Section title", "text"], ["subtitle", "Description", "textarea"],
+    ["image", "Section image", "image"], ["link", "Internal link (optional)", "text"],
+    ["placement", "Placement", "placement"], ["order", "Display order", "number"],
+    ["active", "Show section", "checkbox"],
+  ],
   packages: [
     ["title", "Package title", "text"],
     ["description", "Description", "textarea"],
@@ -42,7 +52,7 @@ const fields = {
     ["themes", "Travel themes", "multithemes"],
     ["duration", "Duration (days)", "number"],
     ["hotelCategory", "Hotel category", "text"],
-    ["images", "Images (one URL per line)", "images"],
+    ["images", "Package images", "images"],
     ["itinerary", "Day-wise itinerary", "itinerary"],
     ["inclusions", "Inclusions (one per line)", "lines"],
     ["exclusions", "Exclusions (one per line)", "lines"],
@@ -99,6 +109,7 @@ const fields = {
   ],
 };
 const defaults = {
+  sections: { title: "", subtitle: "", image: "", link: "", placement: "home", order: 0, active: true },
   packages: {
     title: "",
     description: "",
@@ -143,14 +154,8 @@ export default function Admin() {
     [open, setOpen] = useState(false);
   const section = location.pathname.split("/")[2] || "dashboard";
   if (!ready) return <Loading />;
-  if (!user) return <Navigate to="/login" />;
-  if (user.role !== "admin")
-    return (
-      <div className="empty">
-        <h1>Admin access required.</h1>
-        <Link to="/">Return to website</Link>
-      </div>
-    );
+  if (!user) return <Navigate to="/admin/login" replace />;
+  if (user.role !== "admin") return <Navigate to="/" replace />;
   return (
     <div className="admin-layout">
       <aside className={`admin-sidebar ${open ? "visible" : ""}`}>
@@ -199,7 +204,7 @@ export default function Admin() {
           </Link>
         </div>
         <div className="admin-content" key={section}>
-          {section === "dashboard" ? (
+          {section === "media" ? <MediaLibrary /> : section === "dashboard" ? (
             <Dashboard />
           ) : section === "bookings" ? (
             <Bookings />
@@ -377,7 +382,7 @@ function Manager({ type }) {
                   ? "theme"
                   : type === "addons"
                     ? "add-on"
-                    : "banner"}
+                    : type === "sections" ? "section" : "banner"}
         </button>
       </div>
       {error && (
@@ -416,7 +421,7 @@ function Manager({ type }) {
                     <td>
                       <div className="table-name">
                         {(item.image || item.images?.[0]) && (
-                          <img src={item.image || item.images[0]} alt="" />
+                          <SiteImage src={item.image || item.images[0]} alt="" />
                         )}
                         <div>
                           <strong>
@@ -535,24 +540,6 @@ function Editor({ type, record, onClose, onSaved }) {
       .catch((e) => setError(e.message));
   }, [type]);
   const set = (key, v) => setForm((f) => ({ ...f, [key]: v }));
-  async function upload(key, file) {
-    if (!file) return;
-    setUploading(key);
-    try {
-      const body = new FormData();
-      body.append("image", file);
-      const result = await api("/admin/upload", { method: "POST", body });
-      set(
-        key,
-        key === "images" ? [...(form.images || []), result.url] : result.url,
-      );
-      notify("Image uploaded");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setUploading("");
-    }
-  }
   async function save(e) {
     e.preventDefault();
     setBusy(true);
@@ -596,7 +583,10 @@ function Editor({ type, record, onClose, onSaved }) {
             className={`field ${["textarea", "images", "itinerary", "lines"].includes(kind) ? "wide" : ""}`}
             key={key}
           >
-            {kind === "checkbox" ? (
+            {["image", "images"].includes(kind) ? (
+              <ImageField label={label} value={form[key]} multiple={kind === "images"}
+                onChange={value => set(key, value)} onBusy={value => setUploading(value ? key : "")} />
+            ) : kind === "checkbox" ? (
               <label className="check-label">
                 <input
                   type="checkbox"
@@ -701,14 +691,14 @@ function Editor({ type, record, onClose, onSaved }) {
             ) : (
               <label>
                 {label}
-                {["destinations", "packages", "season"].includes(kind) ? (
+                {["destinations", "packages", "season", "placement"].includes(kind) ? (
                   <select
                     required
                     value={form[key] || ""}
                     onChange={(e) => set(key, e.target.value)}
                   >
                     <option value="">Select…</option>
-                    {kind === "season"
+                    {kind === "placement" ? ["home", "values", "auth"].map(value => <option key={value} value={value}>{value === "home" ? "Homepage section" : value === "values" ? "Homepage values image" : "Login / register image"}</option>) : kind === "season"
                       ? ["off-season", "normal", "peak"].map((s) => (
                           <option key={s}>{s}</option>
                         ))
@@ -751,7 +741,7 @@ function Editor({ type, record, onClose, onSaved }) {
                           ? "1"
                           : undefined
                     }
-                    required={!["image", "phone"].includes(key)}
+                    required={!["image", "phone", "link"].includes(key)}
                     value={form[key] ?? ""}
                     onChange={(e) =>
                       set(
@@ -764,27 +754,6 @@ function Editor({ type, record, onClose, onSaved }) {
                   />
                 )}
               </label>
-            )}
-            {["image", "images"].includes(kind) && (
-              <div className="upload-row">
-                <label className="upload-button">
-                  <Upload size={16} />
-                  {uploading === key ? "Uploading…" : "Upload image"}
-                  <input
-                    hidden
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    disabled={!!uploading}
-                    onChange={(e) => upload(key, e.target.files[0])}
-                  />
-                </label>
-                {(key === "images" ? form.images : [form.image])
-                  ?.filter(Boolean)
-                  .map((url, i) => (
-                    <img key={i} src={url} alt="Upload preview" />
-                  ))}
-                <small>JPG, PNG or WebP · max 5 MB</small>
-              </div>
             )}
           </div>
         ))}

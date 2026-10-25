@@ -1,8 +1,6 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 import {
-  User,
   Destination,
   Theme,
   Package,
@@ -15,32 +13,7 @@ if (!process.env.MONGODB_URI)
   throw Error("Set MONGODB_URI in server/.env first.");
 await mongoose.connect(process.env.MONGODB_URI);
 try {
-  for (const [role, email, password, name] of [
-    [
-      "admin",
-      process.env.ADMIN_EMAIL,
-      process.env.ADMIN_PASSWORD,
-      "Roam Admin",
-    ],
-    [
-      "customer",
-      process.env.CUSTOMER_EMAIL,
-      process.env.CUSTOMER_PASSWORD,
-      "Alex Traveller",
-    ],
-  ]) {
-    if (!email || !password || password.length < 8)
-      throw Error(
-        "Set seed email and password variables in server/.env (minimum 8 characters).",
-      );
-    if (!(await User.exists({ email })))
-      await User.create({
-        email,
-        name,
-        role,
-        password: await bcrypt.hash(password, 12),
-      });
-  }
+  // Authentication accounts are created only by verified sign-in flows.
   await Settings.findOneAndUpdate(
     { key: "main" },
     {
@@ -68,7 +41,6 @@ try {
     [
       "Goa",
       "Salt in the air. Time on your side.",
-      "photo-1512343879784-a960bf40e7f2",
       "The slow life, Goa",
       5,
       14900,
@@ -77,7 +49,6 @@ try {
     [
       "Manali",
       "Find your kind of mountain high.",
-      "photo-1626621341517-bbf3d9990a23",
       "Into the Himalayas",
       6,
       18900,
@@ -86,7 +57,6 @@ try {
     [
       "Kerala",
       "Let the backwaters set the pace.",
-      "photo-1602216056096-3b40cc0c9944",
       "A greener kind of getaway",
       7,
       24900,
@@ -95,18 +65,16 @@ try {
     [
       "Rajasthan",
       "Every fort has a story. Find yours.",
-      "photo-1599661046827-dacff0c0f09a",
       "Royal roads of Rajasthan",
       6,
       21900,
       "Pink cities, golden dunes and warm welcomes on a journey through history.",
     ],
   ];
-  for (const [name, description, img, title, duration, rate, copy] of places) {
-    const image = `https://images.unsplash.com/${img}?auto=format&fit=crop&w=1600&q=85`;
+  for (const [name, description, title, duration, rate, copy] of places) {
     const destination = await Destination.findOneAndUpdate(
       { name },
-      { $setOnInsert: { name, description, image, active: true } },
+      { $setOnInsert: { name, description, image: "", active: true } },
       { new: true, upsert: true },
     );
     if (await Package.exists({ title })) continue;
@@ -116,7 +84,7 @@ try {
       destination: destination.id,
       themes: [themes[name === "Manali" ? 2 : name === "Kerala" ? 1 : 0].id],
       duration,
-      images: [image],
+      images: [],
       hotelCategory: "4-star boutique stays",
       featured: true,
       active: true,
@@ -180,15 +148,15 @@ try {
       title: "Somewhere new.\nSomething you.",
       subtitle:
         "Thoughtfully planned group journeys. Extraordinary places. Just the right company.",
-      image:
-        "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=2200&q=90",
+      image: "",
       buttonText: "Find your next escape",
       link: "/packages",
       active: true,
     });
   console.log(
-    "Seed complete. Existing records were preserved. Test logins use the credentials in server/.env.",
+    "Catalogue seed complete. Existing records were preserved. Authentication uses Supabase customers and the configured backend administrator.",
   );
 } finally {
   await mongoose.disconnect();
 }
+

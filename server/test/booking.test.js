@@ -11,8 +11,47 @@ import {
   Departure,
   Addon,
   Booking,
+  Media,
 } from "../src/models.js";
 let repl, server, base, adminCookie, customerCookie, p, d, addon, booking;
+const realFetch = globalThis.fetch;
+const identities = new Map();
+const sessions = new Map();
+const authOrigin = "https://booking-auth.test";
+const testPassword = "SecureTest123!";
+let signupBody;
+// Mock only the external Auth boundary; Express auth, cookies, role checks and
+// MongoDB profile linking still run unchanged. Never contact a real provider.
+async function mockFetch(input, options = {}) {
+  const url = new URL(String(input));
+  if (url.origin !== authOrigin) {
+    if (base && url.origin === new URL(base).origin) return realFetch(input, options);
+    throw new Error(`Unexpected outbound test request: ${url.origin}`);
+  }
+  assert.equal(new Headers(options.headers).get("apikey"), "test-publishable-key");
+  const data = options.body ? JSON.parse(options.body) : {};
+  const json = (body, status = 200) => Response.json(body, { status });
+  if (url.pathname === "/auth/v1/signup") {
+    signupBody = data;
+    identities.set(data.email, { id: `test-${data.email}`, email: data.email,
+      user_metadata: data.data });
+    return json({ user: identities.get(data.email) });
+  }
+  if (url.pathname === "/auth/v1/token" && url.searchParams.get("grant_type") === "password") {
+    const identity = identities.get(data.email);
+    if (!identity || data.password !== testPassword) return json({ message: "Invalid credentials" }, 400);
+    if (!identity.email_confirmed_at) return json({ code: "email_not_confirmed" }, 400);
+    const access = `mock-access-${identity.id}`;
+    sessions.set(access, identity);
+    return json({ access_token: access, refresh_token: `mock-refresh-${identity.id}`, expires_in: 3600 });
+  }
+  if (url.pathname === "/auth/v1/user") {
+    const token = new Headers(options.headers).get("authorization")?.replace(/^Bearer /, "");
+    const identity = sessions.get(token);
+    return identity ? json(identity) : json({ message: "Invalid token" }, 401);
+  }
+  throw new Error(`Unexpected Supabase test endpoint: ${url.pathname}`);
+}
 async function request(url, method = "GET", body, cookie) {
   const r = await fetch(base + url, {
     method,
@@ -25,7 +64,12 @@ async function request(url, method = "GET", body, cookie) {
   return {
     status: r.status,
     body: await r.json(),
-    cookie: r.headers.get("set-cookie")?.split(";")[0],
+    // Keep the final value of each cookie: login first clears old cookies,
+    // then sets the Supabase tokens and signed application session.
+    cookie: [...new Map(r.headers.getSetCookie().map(value => {
+      const pair = value.split(";")[0];
+      return [pair.slice(0, pair.indexOf("=")), pair];
+    })).values()].join("; "),
   };
 }
 before(
@@ -33,6 +77,14 @@ before(
     process.env.NODE_ENV = "test";
     process.env.JWT_SECRET =
       "test-only-random-secret-which-is-over-32-characters";
+    process.env.ADMIN_EMAIL = "admin@test.com";
+    process.env.ADMIN_PASSWORD_HASH = await bcrypt.hash(testPassword, 4);
+    process.env.SUPABASE_URL = authOrigin;
+    process.env.SUPABASE_PUBLISHABLE_KEY = "test-publishable-key";
+    process.env.CLIENT_URL = "http://localhost:5173";
+    globalThis.fetch = mockFetch;
+    identities.set("customer@test.com", { id: "test-customer", email: "customer@test.com",
+      email_confirmed_at: new Date().toISOString(), user_metadata: { full_name: "Customer" } });
     repl = await MongoMemoryReplSet.create({
       replSet: { count: 1 },
       binary: { version: "7.0.14" },
@@ -42,11 +94,8 @@ before(
     server = app.listen(0, "127.0.0.1");
     await new Promise((resolve) => server.on("listening", resolve));
     base = `http://127.0.0.1:${server.address().port}/api`;
-    const hash = await bcrypt.hash("TestPass!123", 4);
-    await User.create([
-      { name: "Admin", email: "admin@test.com", password: hash, role: "admin" },
-      { name: "Customer", email: "customer@test.com", password: hash },
-    ]);
+    // An existing profile must link without changing its MongoDB identity.
+    const customer = await User.create({ name: "Customer", email: "customer@test.com" });
     await User.init();
     await Settings.create({ key: "main", gst: 5 });
     const dest = await Destination.create({ name: "Goa" });
@@ -67,22 +116,25 @@ before(
       season: "peak",
     });
     addon = await Addon.create({ name: "Pickup", price: 100, active: true });
-    adminCookie = (
-      await request("/auth/login", "POST", {
+    const adminLogin = await request("/auth/admin/login", "POST", {
         email: "admin@test.com",
-        password: "TestPass!123",
-      })
-    ).cookie;
-    customerCookie = (
-      await request("/auth/login", "POST", {
+        password: testPassword,
+      });
+    assert.equal(adminLogin.status, 200, JSON.stringify(adminLogin.body));
+    adminCookie = adminLogin.cookie;
+    const customerLogin = await request("/auth/login", "POST", {
         email: "customer@test.com",
-        password: "TestPass!123",
-      })
-    ).cookie;
+        password: testPassword,
+      });
+    assert.equal(customerLogin.status, 200, JSON.stringify(customerLogin.body));
+    assert.equal(customerLogin.body.id, customer.id);
+    customerCookie = customerLogin.cookie;
+    assert.equal((await request("/auth/me", "GET", null, customerCookie)).body.role, "customer");
   },
   { timeout: 900000 },
 );
 after(async () => {
+  globalThis.fetch = realFetch;
   if (server) {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
@@ -224,6 +276,21 @@ test("concurrent requests cannot oversell", async () => {
   assert.equal((await Departure.findById(d.id)).bookedSeats, 1);
 });
 
+test("invalid Supabase tokens and revoked MongoDB admin roles fail securely", async () => {
+  const invalidCookie = customerCookie.split("; ")
+    .filter(pair => !pair.startsWith("sb_refresh="))
+    .map(pair => pair.startsWith("sb_access=") ? "sb_access=invalid-token" : pair)
+    .join("; ");
+  assert.equal((await request("/auth/me", "GET", null, invalidCookie)).status, 401);
+  assert.equal((await request("/bookings", "GET", null, invalidCookie)).status, 401);
+  await User.updateOne({ email: "admin@test.com" }, { $set: { role: "customer" } });
+  try {
+    assert.equal((await request("/admin/settings", "GET", null, adminCookie)).status, 403);
+  } finally {
+    await User.updateOne({ email: "admin@test.com" }, { $set: { role: "admin" } });
+  }
+});
+
 test("admin catalogue edits reach public APIs and customers cannot escalate roles", async () => {
   const reg = await request("/auth/register", "POST", {
     name: "New User",
@@ -231,19 +298,30 @@ test("admin catalogue edits reach public APIs and customers cannot escalate role
     password: "SecureTest123!",
     role: "admin",
   });
-  assert.equal(reg.status, 200);
-  assert.equal(reg.body.role, "customer");
+  assert.equal(reg.status, 201);
+  assert.equal(signupBody.role, undefined);
+  assert.deepEqual(signupBody.data, { full_name: "New User" });
+  assert.equal(await User.findOne({ email: "new@test.com" }), null);
+  const credentials = { email: "new@test.com", password: testPassword };
+  assert.equal((await request("/auth/login", "POST", credentials)).status, 403);
+  identities.get(credentials.email).email_confirmed_at = new Date().toISOString();
+  const login = await request("/auth/login", "POST", credentials);
+  assert.equal(login.status, 200, JSON.stringify(login.body));
+  assert.equal(login.body.role, "customer");
   assert.equal(
-    (await request("/admin/packages", "POST", {}, reg.cookie)).status,
+    (await request("/admin/packages", "POST", {}, login.cookie)).status,
     403,
   );
+  // Catalogue images must be registered media, without live Cloudinary calls.
+  const image = "https://res.cloudinary.com/test/image/upload/v1/tour-booking/fixture.webp";
+  await Media.create({ url: image, publicId: "tour-booking/fixture", name: "Test image" });
   const dest = await request(
     "/admin/destinations",
     "POST",
     {
       name: "Test Valley",
       description: "From the admin panel",
-      image: "https://example.com/valley.jpg",
+      image,
       active: true,
     },
     adminCookie,
@@ -261,7 +339,7 @@ test("admin catalogue edits reach public APIs and customers cannot escalate role
     destination: dest.body._id,
     themes: [theme.body._id],
     duration: 4,
-    images: ["https://example.com/tour.jpg"],
+    images: [image],
     itinerary: [{ day: 1, title: "Arrival", description: "A warm welcome" }],
     inclusions: ["Breakfast"],
     exclusions: ["Flights"],
@@ -279,7 +357,7 @@ test("admin catalogue edits reach public APIs and customers cannot escalate role
     {
       title: "New banner",
       subtitle: "Changed live",
-      image: "https://example.com/banner.jpg",
+      image,
       buttonText: "Go",
       link: "/packages",
       active: true,

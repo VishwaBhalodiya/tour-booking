@@ -1,13 +1,10 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import express from "express";
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -23,8 +20,11 @@ import {
   Settings,
   Booking,
   entities,
+  Section,
 } from "./models.js";
 import { calculatePrice } from "./pricing.js";
+import { registerMediaRoutes, normalizeImageReferences } from "./media.js";
+import { auth, admin, registerAuthRoutes } from "./auth.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = express();
 const allowedOrigins = [process.env.CLIENT_URL || "http://localhost:5173"];
@@ -54,6 +54,9 @@ app.use("/api", (req, res, next) => {
 const asyncRoute = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch(next);
 const subscribers = new Set();
+app.locals.publishContent = () => {
+  for (const subscriber of subscribers) subscriber.write("data: updated\n\n");
+};
 app.get("/api/events", (req, res) => {
   res.set({
     "Content-Type": "text/event-stream",
@@ -86,112 +89,25 @@ const fail = (message, status = 400) => {
   e.status = status;
   throw e;
 };
-const auth = asyncRoute(async (req, res, next) => {
-  try {
-    const token = jwt.verify(req.cookies.session, process.env.JWT_SECRET);
-    req.user = await User.findById(token.id);
-    if (!req.user) throw Error();
-    next();
-  } catch {
-    fail("Please sign in to continue.", 401);
-  }
-});
-const admin = (req, res, next) =>
-  req.user.role === "admin"
-    ? next()
-    : res.status(403).json({ message: "Admin access required." });
-const safeUser = (u) => ({
-  id: u.id,
-  name: u.name,
-  email: u.email,
-  role: u.role,
-  wishlist: u.wishlist,
-});
-const signIn = (res, u) => {
-  res.cookie(
-    "session",
-    jwt.sign({ id: u.id }, process.env.JWT_SECRET, { expiresIn: "7d" }),
-    {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 604800000,
-    },
-  );
-  res.json(safeUser(u));
-};
-const loginLimit = rateLimit({ windowMs: 900000, limit: 30 });
-app.get("/api/health", (req, res) =>
-  res.json({
-    status:
-      mongoose.connection.readyState === 1 ? "ok" : "database-unavailable",
-  }),
-);
-app.post(
-  "/api/auth/register",
-  loginLimit,
-  asyncRoute(async (req, res) => {
-    const data = z
-      .object({
-        name: z.string().trim().min(2).max(80),
-        email: z
-          .string()
-          .email()
-          .transform((v) => v.toLowerCase()),
-        password: z.string().min(8).max(100),
-      })
-      .parse(req.body);
-    if (await User.exists({ email: data.email }))
-      fail("Email already registered.");
-    const u = await User.create({
-      ...data,
-      password: await bcrypt.hash(data.password, 12),
-    });
-    signIn(res, u);
-  }),
-);
-app.post(
-  "/api/auth/login",
-  loginLimit,
-  asyncRoute(async (req, res) => {
-    const data = z
-      .object({ email: z.string().email(), password: z.string().max(100) })
-      .parse(req.body);
-    const u = await User.findOne({ email: data.email.toLowerCase() }).select(
-      "+password",
-    );
-    if (!u || !(await bcrypt.compare(data.password, u.password)))
-      fail("Invalid email or password.", 401);
-    signIn(res, u);
-  }),
-);
-app.post("/api/auth/logout", (req, res) => {
-  res.clearCookie("session");
-  res.json({ ok: true });
-});
-app.get("/api/auth/me", auth, (req, res) => res.json(safeUser(req.user)));
-app.put(
-  "/api/auth/profile",
-  auth,
-  asyncRoute(async (req, res) => {
-    req.user.name = z.string().trim().min(2).max(80).parse(req.body.name);
-    await req.user.save();
-    res.json(safeUser(req.user));
-  }),
-);
+registerAuthRoutes(app);
+app.use("/api/admin", auth, admin);
+app.get("/api/health", (req, res) => res.json({
+  status: mongoose.connection.readyState === 1 ? "ok" : "database-unavailable",
+}));
 app.get(
   "/api/catalog",
   asyncRoute(async (req, res) => {
-    const [destinations, themes, addons, banners, settings] = await Promise.all(
+    const [destinations, themes, addons, banners, settings, sections] = await Promise.all(
       [
         Destination.find({ active: true }),
         Theme.find({ active: true }),
         Addon.find({ active: true }),
         Banner.find({ active: true }),
         Settings.findOne({ key: "main" }),
+        Section.find({ active: true }).sort("order createdAt"),
       ],
     );
-    res.json({ destinations, themes, addons, banners, settings });
+    res.json({ destinations, themes, addons, banners, settings, sections });
   }),
 );
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -199,7 +115,7 @@ app.get(
   "/api/packages",
   asyncRoute(async (req, res) => {
     const { search, destination, theme, duration, featured } = req.query;
-    const filter = { active: true };
+    const filter = { active: true, archived: { $ne: true } };
     if (search)
       filter.$or = [
         {
@@ -278,6 +194,7 @@ app.get(
     const p = await Package.findOne({
       _id: req.params.id,
       active: true,
+      archived: { $ne: true },
     }).populate("destination themes");
     if (!p) fail("Package not found.", 404);
     const departures = await Departure.find({ package: p.id }).sort("date");
@@ -466,7 +383,6 @@ app.post(
     res.json(await changeStatus(req.params.id, "Cancelled", req.user)),
   ),
 );
-app.use("/api/admin", auth, admin);
 app.get(
   "/api/admin/dashboard",
   asyncRoute(async (req, res) => {
@@ -541,27 +457,8 @@ app.put(
     res.json(await changeStatus(req.params.id, req.body.status, req.user)),
   ),
 );
-fs.mkdirSync(path.join(root, "uploads"), { recursive: true });
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: path.join(root, "uploads"),
-    filename: (req, file, cb) =>
-      cb(
-        null,
-        `${Date.now()}-${crypto.randomUUID()}.${file.mimetype === "image/png" ? "png" : file.mimetype === "image/webp" ? "webp" : "jpg"}`,
-      ),
-  }),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) =>
-    cb(null, ["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)),
-});
-app.post("/api/admin/upload", upload.single("image"), (req, res) => {
-  if (!req.file)
-    return res
-      .status(400)
-      .json({ message: "Upload a JPG, PNG or WebP image (max 5 MB)." });
-  res.json({ url: `/uploads/${req.file.filename}` });
-});
+registerMediaRoutes(app, path.join(root, "uploads"));
+// Read-only compatibility for unmigrated uploads. New uploads go to Cloudinary.
 app.use(
   "/uploads",
   express.static(path.join(root, "uploads"), {
@@ -573,13 +470,14 @@ const str = z.string().trim().max(10000),
   id = z
     .string()
     .refine((v) => mongoose.isValidObjectId(v), "Invalid reference"),
-  image = z
-    .string()
-    .refine(
-      (v) => !v || v.startsWith("/uploads/") || /^https:\/\//.test(v),
-      "Use an HTTPS image URL or upload an image",
-    );
+  image = z.string().max(2048);
 const schemas = {
+  sections: z.object({
+    title: str.min(1), subtitle: str, image,
+    link: z.string().refine(v => !v || /^\/(?!\/)/.test(v), "Use an internal link."),
+    placement: z.enum(["home", "values", "auth"]),
+    order: z.number().int().min(0), active: z.boolean(),
+  }),
   destinations: z.object({
     name: str.min(1),
     description: str,
@@ -641,13 +539,13 @@ app.get(
   "/api/admin/:entity",
   asyncRoute(async (req, res) => {
     const M = entity(req);
-    let q = M.find().sort("-createdAt");
+    let q = M.find(req.params.entity === "packages" ? { archived: { $ne: true } } : {}).sort("-createdAt");
     if (req.params.entity === "packages") q = q.populate("destination themes");
     if (req.params.entity === "departures") q = q.populate("package");
     res.json(await q);
   }),
 );
-async function validateEntity(type, body) {
+async function validateEntity(type, body, existing = {}) {
   const data = schemas[type].parse(body);
   if (type === "packages") {
     if (!(await Destination.exists({ _id: data.destination })))
@@ -660,7 +558,7 @@ async function validateEntity(type, body) {
   }
   if (type === "departures" && !(await Package.exists({ _id: data.package })))
     fail("Choose an existing package.");
-  return data;
+  return normalizeImageReferences(data, existing);
 }
 app.post(
   "/api/admin/:entity",
@@ -674,12 +572,13 @@ app.post(
 app.put(
   "/api/admin/:entity/:id",
   asyncRoute(async (req, res) => {
-    const M = entity(req),
-      data = await validateEntity(req.params.entity, req.body);
+    const M = entity(req);
     let result;
     await mongoose.connection.transaction(async (session) => {
       const current = await M.findById(req.params.id).session(session);
       if (!current) fail("Record not found.", 404);
+      if (req.params.entity === "packages" && current.archived) fail("This package is archived.", 409);
+      const data = await validateEntity(req.params.entity, req.body, current);
       if (req.params.entity === "departures") {
         if (data.totalSeats < current.bookedSeats)
           fail(
@@ -713,8 +612,14 @@ app.delete(
         type === "packages" &&
         ((await Booking.exists({ package: id }).session(session)) ||
           (await Departure.exists({ package: id }).session(session)))
-      )
-        fail("Package has departures or bookings. Unpublish it instead.");
+      ) {
+        // Preserve references and agreed prices for existing bookings.
+        exists.active = false;
+        exists.featured = false;
+        exists.archived = true;
+        await exists.save({ session });
+        return;
+      }
       if (
         type === "destinations" &&
         (await Package.exists({ destination: id }).session(session))
@@ -730,12 +635,18 @@ app.delete(
     res.json({ ok: true });
   }),
 );
+// Unknown admin URLs must not fall through to the React HTML response.
+app.use("/api/admin", (req, res) => {
+  res.status(404).json({ message: "Admin endpoint not found." });
+});
 const dist = path.resolve(root, "../client/dist");
 if (fs.existsSync(dist)) {
   app.use(express.static(dist));
   app.get("*", (req, res) => res.sendFile(path.join(dist, "index.html")));
 }
 app.use((err, req, res, next) => {
+  if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ message: "Image must be no larger than 5 MB." });
+  if (err.name === "MulterError") return res.status(400).json({ message: "Upload one JPEG, PNG or WebP image at a time." });
   if (err instanceof z.ZodError)
     return res.status(400).json({
       message: err.issues
@@ -749,6 +660,7 @@ app.use((err, req, res, next) => {
     (["ValidationError", "CastError"].includes(err.name) ? 400 : 500);
   if (status === 500) console.error(err.message);
   res.status(status).json({
+    ...(err.code && typeof err.code === "string" ? { code: err.code } : {}),
     message:
       status === 500
         ? "The server could not complete this request. Please try again."
@@ -776,3 +688,4 @@ if (process.env.NODE_ENV !== "test") {
     ),
   );
 }
+

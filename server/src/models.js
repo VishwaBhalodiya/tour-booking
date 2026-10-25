@@ -7,7 +7,11 @@ export const User = make("User", {
   name: String,
   email: { type: String, unique: true },
   password: { type: String, select: false },
+  // Legacy password hashes are retained for preservation only; never used to log in.
+  supabaseId: { type: String, unique: true, sparse: true },
+  authProvider: { type: String, enum: ["legacy", "supabase", "admin"], default: "legacy" },
   role: { type: String, enum: ["customer", "admin"], default: "customer" },
+  sessionVersion: { type: Number, default: 0, select: false },
   wishlist: [ref("Package")],
 });
 export const Destination = make("Destination", {
@@ -32,6 +36,7 @@ export const Package = make("Package", {
   exclusions: [String],
   hotelCategory: String,
   featured: Boolean,
+  archived: { type: Boolean, default: false },
   active: { type: Boolean, default: true },
 });
 export const Departure = make("Departure", {
@@ -74,6 +79,23 @@ export const Settings = make("Settings", {
   childAgeLimit: { type: Number, min: 1, max: 17, default: 11 },
   cancellationCutoff: { type: Number, min: 0, default: 7 },
 });
+export const Section = make("Section", {
+  title: { type: String, required: true },
+  subtitle: String,
+  image: String,
+  link: String,
+  placement: { type: String, enum: ["home", "values", "auth"], default: "home" },
+  order: { type: Number, default: 0 },
+  active: { type: Boolean, default: true },
+});
+export const Media = make("Media", {
+  url: { type: String, required: true, unique: true },
+  publicId: { type: String, required: true },
+  name: String,
+  legacyUrls: [String],
+  deleted: { type: Boolean, default: false },
+  cleanupIds: [String],
+});
 export const Booking = make("Booking", {
   user: ref("User"),
   package: ref("Package"),
@@ -98,4 +120,5 @@ export const entities = {
   themes: Theme,
   addons: Addon,
   banners: Banner,
+  sections: Section,
 };

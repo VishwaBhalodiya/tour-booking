@@ -42,6 +42,9 @@ import {
 } from "lucide-react";
 import { api, money, date, liveInterval, clearLiveInterval } from "./api";
 import Admin from "./Admin";
+import AdminRoute from "./AdminRoute";
+import SiteImage from "./SiteImage";
+import AuthPage from "./AuthPages";
 import "./style.css";
 const Context = createContext();
 export const useApp = () => useContext(Context);
@@ -54,8 +57,8 @@ function App() {
   const refresh = useCallback(
     () =>
       api("/catalog")
-        .then(setCatalog)
-        .catch((e) => setError(e.message)),
+        .then(data => { setCatalog(data); setError(""); })
+        .catch((e) => { setCatalog(null); setError(e.message); }),
     [],
   );
   useEffect(() => {
@@ -73,6 +76,11 @@ function App() {
     };
   }, [refresh]);
   useEffect(() => {
+    const expired = () => setUser(null);
+    window.addEventListener("session-expired", expired);
+    return () => window.removeEventListener("session-expired", expired);
+  }, []);
+  useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 4000);
       return () => clearTimeout(t);
@@ -84,7 +92,8 @@ function App() {
     >
       <BrowserRouter>
         <Routes>
-          <Route path="/admin/*" element={<Admin />} />
+          <Route path="/admin/login" element={<><Header /><AuthPage mode="admin" /><Footer /></>} />
+          <Route path="/admin/*" element={<AdminRoute><Admin /></AdminRoute>} />
           <Route
             path="*"
             element={
@@ -95,8 +104,12 @@ function App() {
                     <Route path="/" element={<Home />} />
                     <Route path="/packages" element={<Listing />} />
                     <Route path="/packages/:id" element={<Detail />} />
-                    <Route path="/login" element={<Auth />} />
-                    <Route path="/register" element={<Auth register />} />
+                    <Route path="/login" element={<AuthPage mode="login" />} />
+                    <Route path="/register" element={<AuthPage mode="register" />} />
+                    <Route path="/verify-email" element={<AuthPage mode="verify" />} />
+                    <Route path="/forgot-password" element={<AuthPage mode="forgot" />} />
+                    <Route path="/reset-password" element={<AuthPage mode="reset" />} />
+                    <Route path="/auth/confirm" element={<AuthPage mode="confirm" />} />
                     <Route path="/bookings" element={<Account />} />
                     <Route path="/profile" element={<Account profile />} />
                     <Route path="/wishlist" element={<Wishlist />} />
@@ -141,7 +154,7 @@ function App() {
   );
 }
 function Header() {
-  const { user, setUser, catalog } = useApp(),
+  const { user, setUser, catalog, notify } = useApp(),
     [open, setOpen] = useState(false);
   return (
     <header>
@@ -167,8 +180,13 @@ function Header() {
                 className="icon"
                 aria-label="Sign out"
                 onClick={async () => {
-                  await api("/auth/logout", { method: "POST" });
-                  setUser(null);
+                  try {
+                    await api("/auth/logout", { method: "POST" });
+                    setUser(null);
+                  } catch (error) {
+                    if (error.status === 401) setUser(null);
+                    else notify(error.message);
+                  }
                 }}
               >
                 <LogOut size={18} />
@@ -238,13 +256,14 @@ function Home() {
     [destination, setDestination] = useState(""),
     [duration, setDuration] = useState("");
   useEffect(() => {
+    let active = true;
     const load = () =>
       api("/packages?featured=true")
-        .then((d) => setPackages(d.items))
-        .catch(() => {});
+        .then((d) => active && setPackages(d.items))
+        .catch(() => active && setPackages([]));
     load();
     const t = liveInterval(load, 10000);
-    return () => clearLiveInterval(t);
+    return () => { active = false; clearLiveInterval(t); };
   }, []);
   const banner =
     catalog?.banners?.[index % Math.max(catalog.banners.length, 1)];
@@ -256,7 +275,7 @@ function Home() {
         style={
           banner?.image
             ? {
-                backgroundImage: `linear-gradient(90deg,rgba(7,30,24,.65),rgba(7,30,24,.08)),url("${banner.image}")`,
+                backgroundImage: `linear-gradient(90deg,rgba(7,30,24,.65),rgba(7,30,24,.08)),url(${JSON.stringify(banner.image)})`,
               }
             : {}
         }
@@ -366,7 +385,7 @@ function Home() {
               className="destination"
               to={`/packages?destination=${d._id}`}
             >
-              <img src={d.image} alt={d.name} />
+              <SiteImage src={d.image} alt={d.name} />
               <span className="destination-number">0{i + 1}</span>
               <div>
                 <h3>{d.name}</h3>
@@ -410,6 +429,7 @@ function Home() {
       </section>
       <section className="container section values">
         <div>
+          {catalog?.sections?.find(section => section.placement === "values")?.image && <SiteImage className="values-image" src={catalog.sections.find(section => section.placement === "values").image} alt="Our journeys" />}
           <span className="eyebrow">TRAVEL WELL. FEEL EVERYTHING.</span>
           <h2>
             A trip is a place.
@@ -450,6 +470,10 @@ function Home() {
           ))}
         </div>
       </section>
+      {catalog?.sections?.filter(section => section.placement === "home").map(section => <section className="container section managed-section" key={section._id}>
+        {section.image && <SiteImage src={section.image} alt={section.title} />}
+        <div><h2>{section.title}</h2><p>{section.subtitle}</p>{section.link && <Link className="text-link" to={section.link}>Explore <ArrowUpRight size={18} /></Link>}</div>
+      </section>)}
     </>
   );
 }
@@ -469,7 +493,7 @@ export function PackageCard({ p }) {
     <article className="package-card">
       <div className="card-image">
         <Link to={`/packages/${p._id}`}>
-          <img src={p.images?.[0]} alt={p.title} />
+          <SiteImage src={p.images?.[0]} alt={p.title} />
         </Link>
         <span className="pill">
           {p.themes?.[0]?.name || p.hotelCategory || "Group journey"}
@@ -534,7 +558,7 @@ function Listing() {
             setError("");
           }
         })
-        .catch((e) => live && setError(e.message));
+        .catch((e) => { if (live) { setData(null); setError(e.message); } });
     load();
     const t = liveInterval(load, 10000);
     return () => {
@@ -794,7 +818,7 @@ function Detail() {
       </div>
       <div className="gallery">
         {p.images.map((img, i) => (
-          <img key={i} src={img} alt={`${p.title} — view ${i + 1}`} />
+          <SiteImage key={img} src={img} alt={`${p.title} — view ${i + 1}`} />
         ))}
       </div>
       <div className="detail-layout">
@@ -1053,86 +1077,6 @@ function Price({ price }) {
     </div>
   );
 }
-function Auth({ register = false }) {
-  const { setUser } = useApp(),
-    navigate = useNavigate(),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  async function submit(e) {
-    e.preventDefault();
-    setBusy(true);
-    const data = Object.fromEntries(new FormData(e.target));
-    try {
-      const u = await api(`/auth/${register ? "register" : "login"}`, {
-        method: "POST",
-        body: data,
-      });
-      setUser(u);
-      navigate(u.role === "admin" ? "/admin" : "/packages");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="auth-layout">
-      <div className="auth-art">
-        <Compass size={42} />
-        <h1>
-          Good things
-          <br />
-          are out there.
-        </h1>
-        <p>Let’s go find them.</p>
-      </div>
-      <form className="auth-form" onSubmit={submit}>
-        <span className="eyebrow">
-          {register ? "BEGIN YOUR NEXT CHAPTER" : "GOOD TO SEE YOU AGAIN"}
-        </span>
-        <h2>
-          {register ? "A world of possibility." : "Welcome back, traveller."}
-        </h2>
-        <p>
-          {register
-            ? "Create an account and start collecting experiences."
-            : "Your next great escape is just around the corner."}
-        </p>
-        {register && (
-          <label>
-            Full name
-            <input name="name" required minLength="2" autoComplete="name" />
-          </label>
-        )}
-        <label>
-          Email address
-          <input name="email" type="email" required autoComplete="email" />
-        </label>
-        <label>
-          Password
-          <input
-            name="password"
-            type="password"
-            required
-            minLength="8"
-            autoComplete={register ? "new-password" : "current-password"}
-          />
-        </label>
-        {error && <p className="error">{error}</p>}
-        <button className="button full" disabled={busy}>
-          {busy ? "One moment…" : register ? "Create account" : "Sign in"}
-          <ArrowUpRight size={18} />
-        </button>
-        <p>
-          {register ? "Already part of the journey?" : "New around here?"}{" "}
-          <Link to={register ? "/login" : "/register"}>
-            {register ? "Sign in" : "Create an account"}
-          </Link>
-        </p>
-      </form>
-    </div>
-  );
-}
 function Account({ profile = false }) {
   const { user, ready, setUser, notify } = useApp(),
     [bookings, setBookings] = useState(null),
@@ -1195,7 +1139,7 @@ function Account({ profile = false }) {
         <div className="bookings-list">
           {bookings?.map((b) => (
             <article className="booking-card" key={b._id}>
-              <img src={b.package?.images?.[0]} alt="" />
+              <SiteImage src={b.package?.images?.[0]} alt="" />
               <div>
                 <span className={`status ${b.status.toLowerCase()}`}>
                   {b.status}
@@ -1317,3 +1261,4 @@ export function Loading() {
   );
 }
 createRoot(document.getElementById("root")).render(<App />);
+
