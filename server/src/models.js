@@ -1,0 +1,14 @@
+import mongoose from 'mongoose';
+const {Schema,model}=mongoose;
+const ref=name=>({type:Schema.Types.ObjectId,ref:name});
+const make=(name,fields)=>model(name,new Schema(fields,{timestamps:true}));
+export const User=make('User',{name:String,email:{type:String,unique:true},password:{type:String,select:false},role:{type:String,enum:['customer','admin'],default:'customer'},wishlist:[ref('Package')]});
+export const Destination=make('Destination',{name:{type:String,required:true},description:String,image:String,active:{type:Boolean,default:true}});
+export const Theme=make('Theme',{name:{type:String,required:true},active:{type:Boolean,default:true}});
+export const Package=make('Package',{title:{type:String,required:true},description:String,destination:ref('Destination'),themes:[ref('Theme')],duration:{type:Number,min:1,required:true},images:[String],itinerary:[{day:Number,title:String,description:String}],inclusions:[String],exclusions:[String],hotelCategory:String,featured:Boolean,active:{type:Boolean,default:true}});
+export const Departure=make('Departure',{package:ref('Package'),date:{type:Date,required:true},totalSeats:{type:Number,min:0,required:true},bookedSeats:{type:Number,default:0,min:0},adultRate:{type:Number,min:0,required:true},childRate:{type:Number,min:0,required:true},singleCharge:{type:Number,min:0,default:0},tripleCharge:{type:Number,default:0},season:{type:String,enum:['off-season','normal','peak'],default:'normal'},seasonMultiplier:{type:Number,min:0.1,default:1},closed:{type:Boolean,default:false}});
+export const Addon=make('Addon',{name:{type:String,required:true},price:{type:Number,min:0,required:true},perPerson:{type:Boolean,default:false},active:{type:Boolean,default:true}});
+export const Banner=make('Banner',{title:{type:String,required:true},subtitle:String,image:String,buttonText:String,link:String,active:{type:Boolean,default:true}});
+export const Settings=make('Settings',{key:{type:String,unique:true,default:'main'},businessName:{type:String,default:'Roam'},email:{type:String,default:'hello@roam.test'},phone:{type:String,default:'+91 98765 43210'},gst:{type:Number,min:0,max:100,default:5},childAgeLimit:{type:Number,min:1,max:17,default:11},cancellationCutoff:{type:Number,min:0,default:7}});
+export const Booking=make('Booking',{user:ref('User'),package:ref('Package'),departure:ref('Departure'),adults:Number,children:Number,sharing:String,addons:[ref('Addon')],travellers:[{name:String,age:Number,idProof:String}],price:Schema.Types.Mixed,status:{type:String,enum:['Pending','Confirmed','Completed','Cancelled'],default:'Pending'},payment:{type:String,default:'Pay Later'}});
+export const entities={packages:Package,departures:Departure,destinations:Destination,themes:Theme,addons:Addon,banners:Banner};
