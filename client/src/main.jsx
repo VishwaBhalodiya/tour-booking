@@ -177,8 +177,9 @@ function Header() {
                 {user.name.slice(0, 1)}
               </Link>
               <button
-                className="icon"
-                aria-label="Sign out"
+                className="icon login-link"
+                aria-label="Log out"
+                title="Log out"
                 onClick={async () => {
                   try {
                     await api("/auth/logout", { method: "POST" });
@@ -190,6 +191,7 @@ function Header() {
                 }}
               >
                 <LogOut size={18} />
+                <span>Log out</span>
               </button>
             </>
           ) : (
