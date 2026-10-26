@@ -89,68 +89,8 @@ npm run dev --workspace=client
 | Admin login | http://127.0.0.1:5173/admin/login |
 | API health | http://127.0.0.1:4000/api/health |
 
-For a fresh database, `npm run seed` adds sample catalogue content. It does not create authentication accounts. Existing installations do not need to seed again.
 
-## Authentication configuration
-
-Customers register with their own email and verify it before login. There are no shared customer test credentials. Administrators use the configured email and the password corresponding to the backend hash.
-
-In Supabase, enable email/password authentication and email confirmation. Set the site URL to the frontend origin and allow its `/auth/confirm` and `/reset-password` URLs.
-
-Use these links in the respective Supabase email templates:
-
-**Confirm signup**
-
-```html
-<a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=signup">Verify email</a>
 ```
 
-**Reset password**
 
-```html
-<a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=recovery">Reset password</a>
-```
 
-Configure custom SMTP for customer email delivery. Verified existing customer emails link to their MongoDB profiles, preserving booking and wishlist references. Legacy MongoDB passwords no longer authenticate customers.
-
-## Pricing and data
-
-The server calculates seasonal adult/child rates, sharing adjustments and add-ons, then applies the configured GST. Room sharing adjustments apply per traveller; add-ons can apply per booking or traveller.
-
-Bookings store the agreed price breakdown. Later rate changes affect new quotes, while existing booking totals stay unchanged. MongoDB transactions reserve seats and create bookings together; cancellation returns seats once. Packages with booking history are archived rather than removing historical data.
-
-Image files live in Cloudinary; MongoDB stores delivery URLs and asset references. Shared replacements update database references across the website. Manage images through the admin panel so those references remain consistent.
-
-## Project structure
-
-```text
-client/                 React customer website and admin panel
-server/src/             Express API, authentication, models and pricing
-server/test/            API and pricing tests
-server/.env.example     Backend configuration template
-.github/workflows/      Continuous integration
-```
-
-## Commands
-
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Start frontend and API locally |
-| `npm run build` | Build the React frontend |
-| `npm start` | Start the Express server |
-| `npm test` | Run backend tests |
-| `npm run seed` | Add sample catalogue records |
-
-Booking integration tests use an isolated temporary MongoDB replica set and mocked Supabase responses, with no production credentials. The first run downloads a MongoDB binary. The recent test updates have not yet been executed; historical browser QA scripts still need authentication updates.
-
-## Deployment
-
-The intended split deployment is Vercel for the React frontend and Render for the Express API. Keep MongoDB Atlas, Supabase Auth and Cloudinary as external services.
-
-Production requires HTTPS, `NODE_ENV=production`, an exact frontend `CLIENT_URL`, backend secrets configured on Render, Atlas network access and matching Supabase redirect URLs. The frontend must forward `/api` requests to Render through Vercel rewrites, with an SPA fallback for page refreshes.
-
-Vercel rewrites in `client/vercel.json` forward `/api` to `https://roam-tour-api.onrender.com` and provide the SPA fallback. Select `client` as the Vercel root directory. Render automatically sets `RENDER=true`; the API then trusts only its immediate proxy hop. Local development keeps proxy trust disabled. Additional upstream proxies, including Vercel, are not implicitly trusted for client IPs, so requests may share a rate-limit bucket at that upstream proxy. Do not increase the hop count while the Render API remains directly reachable without first securing and validating the forwarding chain.
-
-Set Render's `CLIENT_URL` to the actual Vercel production origin, without a trailing slash, and add that frontend's confirmation/reset URLs in Supabase. Keep the existing secure, HttpOnly cookies and access the API through the Vercel `/api` path. A production build and manual authentication, booking, image and live-update checks remain necessary; these deployment changes have not been runtime-tested.
-
-Payments currently use Pay Later. Online payment processing, coupons and PDF vouchers are not included.
