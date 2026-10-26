@@ -88,8 +88,6 @@ npm run dev --workspace=client
 | Customer website | http://127.0.0.1:5173 |
 | Admin login | http://127.0.0.1:5173/admin/login |
 | API health | http://127.0.0.1:4000/api/health |
-
-
 ```
 
 
